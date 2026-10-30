@@ -89,3 +89,15 @@ ALTER TABLE "Product" ADD CONSTRAINT "Product_manufacturerId_fkey" FOREIGN KEY (
 ALTER TABLE "Batch" ADD CONSTRAINT "Batch_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "ProductIdentity" ADD CONSTRAINT "ProductIdentity_batchId_fkey" FOREIGN KEY ("batchId") REFERENCES "Batch"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "VerificationEvent" ADD CONSTRAINT "VerificationEvent_identityId_fkey" FOREIGN KEY ("identityId") REFERENCES "ProductIdentity"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+CREATE TABLE "AuditLog" (
+  "id" TEXT NOT NULL,
+  "actor" TEXT NOT NULL,
+  "action" TEXT NOT NULL,
+  "targetType" TEXT NOT NULL,
+  "targetId" TEXT NOT NULL,
+  "reason" TEXT NOT NULL,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "AuditLog_pkey" PRIMARY KEY ("id")
+);
+CREATE INDEX "AuditLog_targetType_targetId_createdAt_idx" ON "AuditLog"("targetType", "targetId", "createdAt");
