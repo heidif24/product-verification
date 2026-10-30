@@ -13,6 +13,7 @@
 - Public verification website, manual code lookup and consumer camera-scanning app.
 - Consumer concern reporting, super-admin triage and producer-recorded expiry status.
 - Privacy notice and terms drafts, plus data-subject request intake.
+- Manufacturer root route redirects to the live API-backed workspace; illustrative sample dashboard data is no longer served at the root route.
 
 ## Remaining before pilot
 
