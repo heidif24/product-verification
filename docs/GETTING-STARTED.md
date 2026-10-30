@@ -25,7 +25,7 @@ pnpm --filter @pan/api db:deploy
 pnpm --filter @pan/api dev
 ```
 
-The API is available at `http://localhost:4000/api`.
+The API is available at `http://localhost:4000/api`. In a second terminal, run `pnpm --filter @pan/api smoke` to test the complete API journey against your local database.
 
 ## Start the manufacturer portal
 
