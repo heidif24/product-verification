@@ -7,6 +7,11 @@ on:
 jobs:
   typecheck:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://pan:pan_local_password@localhost:5432/pan?schema=public
+      JWT_SECRET: ci-only-jwt-secret-0123456789-abcdefghijklmnopqrstuvwxyz
+      TOKEN_PEPPER: ci-only-token-pepper-0123456789-abcdefghijklmnopqrstuvwxyz
+      ADMIN_API_KEY: ci-only-admin-key-0123456789-abcdefghijklmnopqrstuvwxyz
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -20,3 +25,4 @@ jobs:
       - run: pnpm --filter @pan/api typecheck
       - run: pnpm --filter @pan/manufacturer-web typecheck
       - run: pnpm --filter @pan/verification-web typecheck
+      - run: pnpm --filter @pan/consumer-mobile typecheck
