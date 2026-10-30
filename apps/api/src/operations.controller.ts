@@ -113,6 +113,18 @@ export class SuperAdminController {
       return identity;
     });
   }
+  @Get("reports")
+  async reports(@Query("status") status = "") {
+    const where = status ? { status } : {};
+    return this.db.consumerReport.findMany({ where, include: { identity: { include: { batch: { include: { product: { include: { manufacturer: { select: { legalName: true } } } } } } } }, orderBy: { createdAt: "desc" }, take: 150 });
+  }
+  @Post("reports/:id/status")
+  async updateReport(@Param("id") id: string, @Body() body: { status?: string; note?: string }) {
+    if (!["IN_REVIEW", "RESOLVED", "DISMISSED"].includes(body.status || "")) throw new BadRequestException("Choose a valid report status.");
+    const report = await this.db.consumerReport.update({ where: { id }, data: { status: body.status!, adminNote: body.note?.trim() || null } });
+    await this.db.auditLog.create({ data: { actor: "SUPER_ADMIN", action: "CONSUMER_REPORT_" + body.status, targetType: "CONSUMER_REPORT", targetId: id, reason: body.note?.trim() || "Consumer report status updated." } });
+    return report;
+  }
   @Get("privacy-requests")
   privacyRequests(@Query("status") status = "") {
     const where = status ? { status } : {};
