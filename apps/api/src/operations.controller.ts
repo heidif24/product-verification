@@ -113,6 +113,18 @@ export class SuperAdminController {
       return identity;
     });
   }
+  @Get("privacy-requests")
+  privacyRequests(@Query("status") status = "") {
+    const where = status ? { status } : {};
+    return this.db.privacyRequest.findMany({ where, orderBy: { createdAt: "desc" }, take: 100 });
+  }
+  @Post("privacy-requests/:id/status")
+  async updatePrivacyRequest(@Param("id") id: string, @Body() body: { status?: string; note?: string }) {
+    if (!["IN_REVIEW", "COMPLETED", "REJECTED"].includes(body.status || "")) throw new BadRequestException("Choose a valid privacy request status.");
+    const request = await this.db.privacyRequest.update({ where: { id }, data: { status: body.status!, adminNote: body.note?.trim() || null } });
+    await this.db.auditLog.create({ data: { actor: "SUPER_ADMIN", action: "PRIVACY_REQUEST_" + body.status, targetType: "PRIVACY_REQUEST", targetId: id, reason: body.note?.trim() || "Privacy request status updated." } });
+    return request;
+  }
   @Get("audit")
   audit(@Query("limit") limit = "100") {
     return this.db.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: Math.min(250, Math.max(1, Number(limit) || 100)) });
@@ -301,3 +313,25 @@ export class ManufacturerOperationsController {
     return { accepted: true, email: user.email };
   }
 }
+
+@Controller()
+export class PrivacyRequestController {
+  constructor(private db: PrismaService) {}
+  @Post("v1/privacy/requests")
+  @Public()
+  @Throttle({ default: { limit: 3, ttl: 3600000 } })
+  async create(@Body() body: { email?: string; requestType?: string; details?: string }) {
+    const email = body.email?.trim().toLowerCase();
+    const allowed = ["ACCESS", "CORRECT", "DELETE", "RESTRICT", "OBJECT", "COMPLAINT"];
+    const details = body.details?.trim() || "";
+    if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || !allowed.includes(body.requestType || "") || details.length < 10 || details.length > 2000) {
+      throw new BadRequestException("Enter a valid email, choose a request type and provide 10 to 2,000 characters of context.");
+    }
+    const request = await this.db.privacyRequest.create({ data: { email, requestType: body.requestType!, details } });
+    const contact = process.env.PRIVACY_CONTACT_EMAIL;
+    if (contact) await sendPanEmail(contact, "New PAN privacy request " + request.id, "<p>A new privacy request has been submitted.</p><p>Reference: " + request.id + "</p><p>Type: " + request.requestType + "</p><p>Requester: " + email + "</p><p>Verify the requester's identity before disclosing or changing any personal information.</p>");
+    await sendPanEmail(email, "PAN privacy request received", "<p>Your privacy request has been received.</p><p>Reference: " + request.id + "</p><p>PAN may contact you to verify your identity before processing the request.</p>");
+    return { received: true, reference: request.id, message: "Your request has been received. Keep the reference number for follow-up." };
+  }
+}
+
