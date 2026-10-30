@@ -1,5 +1,6 @@
 import { Body, Controller, Param, Post, BadRequestException } from "@nestjs/common";
 import { Public } from "./auth";
+import { BadRequestException } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import { createHmac } from "node:crypto";
 import { PrismaService } from "./prisma.service";
@@ -36,5 +37,23 @@ export class ConsumerReportController {
     const identity = await this.db.productIdentity.findUnique({ where: { tokenHash: digest(token) }, select: { id: true, publicCode: true } });
     const safeReference = identity?.publicCode || "UNRECOGNISED-" + digest(token).slice(0, 20).toUpperCase();
     return this.save(identity?.id || null, safeReference, body);
+  }
+}
+
+@Controller()
+export class PrivacyRequestController {
+  constructor(private db: PrismaService) {}
+  @Post("v1/privacy/requests")
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: 3600000 } })
+  async create(@Body() body: { email?: string; requestType?: string; details?: string }) {
+    const email = body.email?.trim().toLowerCase() || "";
+    const details = body.details?.trim() || "";
+    const allowed = ["ACCESS", "CORRECTION", "DELETION", "RESTRICTION", "OBJECTION", "PORTABILITY"];
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !allowed.includes(body.requestType || "") || details.length < 10 || details.length > 1500) {
+      throw new BadRequestException("Enter a valid email, choose a request type and provide 10 to 1,500 characters of detail.");
+    }
+    const request = await this.db.privacyRequest.create({ data: { email, requestType: body.requestType!, details } });
+    return { received: true, reference: request.id, status: request.status, message: "Your privacy request has been received. PAN may contact you to verify your identity before acting on it." };
   }
 }
