@@ -143,14 +143,22 @@ export class ManufacturerOperationsController {
   async updateProfile(@Req() req: AuthRequest, @Body() body: { legalName?: string; registrationNumber?: string; registeredAddress?: string; phone?: string; website?: string; industry?: string }) {
     await workspaceRole(this.db, req, ["OWNER", "ADMIN"]);
     if (body.legalName !== undefined && body.legalName.trim().length < 2) throw new BadRequestException("Enter the registered company name.");
-    return this.db.manufacturer.update({ where: { id: req.user.manufacturerId }, data: {
-      ...(body.legalName !== undefined ? { legalName: body.legalName.trim() } : {}),
-      ...(body.registrationNumber !== undefined ? { registrationNumber: body.registrationNumber.trim() || null } : {}),
-      ...(body.registeredAddress !== undefined ? { registeredAddress: body.registeredAddress.trim() || null } : {}),
-      ...(body.phone !== undefined ? { phone: body.phone.trim() || null } : {}),
-      ...(body.website !== undefined ? { website: body.website.trim() || null } : {}),
-      ...(body.industry !== undefined ? { industry: body.industry.trim() || null } : {})
-    } });
+    const current = await this.db.manufacturer.findUnique({ where: { id: req.user.manufacturerId } });
+    if (!current) throw new NotFoundException("Company workspace not found.");
+    const identityChanged = (body.legalName !== undefined && body.legalName.trim() !== current.legalName) || (body.registrationNumber !== undefined && body.registrationNumber.trim() !== (current.registrationNumber || ""));
+    return this.db.$transaction(async tx => {
+      const updated = await tx.manufacturer.update({ where: { id: req.user.manufacturerId }, data: {
+        ...(body.legalName !== undefined ? { legalName: body.legalName.trim() } : {}),
+        ...(body.registrationNumber !== undefined ? { registrationNumber: body.registrationNumber.trim() || null } : {}),
+        ...(body.registeredAddress !== undefined ? { registeredAddress: body.registeredAddress.trim() || null } : {}),
+        ...(body.phone !== undefined ? { phone: body.phone.trim() || null } : {}),
+        ...(body.website !== undefined ? { website: body.website.trim() || null } : {}),
+        ...(body.industry !== undefined ? { industry: body.industry.trim() || null } : {}),
+        ...(identityChanged ? { status: "PENDING" } : {})
+      } });
+      if (identityChanged) await tx.auditLog.create({ data: { actor: req.user.sub, action: "PRODUCER_IDENTITY_DETAILS_CHANGED", targetType: "MANUFACTURER", targetId: current.id, reason: "Legal company name or registration reference changed; workspace returned to PAN review." } });
+      return updated;
+    });
   }
   @Get("facilities")
   async facilities(@Req() req: AuthRequest) {
