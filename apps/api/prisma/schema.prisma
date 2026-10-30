@@ -203,6 +203,7 @@ model ProductIdentity {
   batch             Batch          @relation(fields: [batchId], references: [id], onDelete: Cascade)
   carton            ProductIdentity? @relation("IdentityPackaging", fields: [parentId], references: [id], onDelete: SetNull)
   containedUnits    ProductIdentity[] @relation("IdentityPackaging")
+  reports           ConsumerReport[]
   events            VerificationEvent[]
   issuedAt          DateTime       @default(now())
   @@index([batchId, status])
@@ -238,6 +239,23 @@ model VerificationEvent {
   createdAt  DateTime        @default(now())
   @@index([identityId, createdAt])
   @@index([createdAt])
+}
+
+model ConsumerReport {
+  id           String          @id @default(cuid())
+  identityId   String?
+  publicCode   String?
+  reason       String
+  details      String
+  contactEmail String?
+  status       String          @default("OPEN")
+  adminNote    String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  identity     ProductIdentity? @relation(fields: [identityId], references: [id], onDelete: SetNull)
+  @@index([status, createdAt])
+  @@index([identityId, createdAt])
+  @@index([publicCode])
 }
 
 model PrivacyRequest {
