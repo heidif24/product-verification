@@ -23,8 +23,12 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: postgresql://pan:pan_local_password@localhost:5432/pan?schema=public
+      NODE_ENV: test
       JWT_SECRET: ci-only-jwt-secret-0123456789-abcdefghijklmnopqrstuvwxyz
       TOKEN_PEPPER: ci-only-token-pepper-0123456789-abcdefghijklmnopqrstuvwxyz
+      EXPORT_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      SUPER_ADMIN_EMAIL: admin@pan.test
+      SUPER_ADMIN_PASSWORD_HASH: $2a$12$invalid-test-hash-placeholder
       ADMIN_API_KEY: ci-only-admin-key-0123456789-abcdefghijklmnopqrstuvwxyz
       PUBLIC_VERIFY_URL: http://localhost:3001
       CORS_ORIGINS: http://localhost:3000,http://localhost:3001
