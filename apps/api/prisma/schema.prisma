@@ -1,0 +1,99 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ManufacturerStatus { PENDING APPROVED SUSPENDED }
+enum MembershipRole { OWNER ADMIN OPERATOR ANALYST }
+enum ProductStatus { DRAFT ACTIVE ARCHIVED }
+enum IdentityStatus { ACTIVE QUARANTINED REVOKED }
+
+model User {
+  id           String       @id @default(cuid())
+  fullName     String
+  email        String       @unique
+  passwordHash String
+  memberships  Membership[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model Manufacturer {
+  id          String             @id @default(cuid())
+  legalName   String
+  slug        String             @unique
+  status      ManufacturerStatus @default(PENDING)
+  memberships Membership[]
+  products    Product[]
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+}
+
+model Membership {
+  id             String         @id @default(cuid())
+  userId         String
+  manufacturerId String
+  role           MembershipRole @default(OWNER)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  manufacturer   Manufacturer   @relation(fields: [manufacturerId], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now())
+  @@unique([userId, manufacturerId])
+  @@index([manufacturerId])
+}
+
+model Product {
+  id             String        @id @default(cuid())
+  manufacturerId String
+  name           String
+  brand          String?
+  category       String?
+  description    String?
+  status         ProductStatus @default(ACTIVE)
+  manufacturer   Manufacturer  @relation(fields: [manufacturerId], references: [id], onDelete: Cascade)
+  batches        Batch[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  @@index([manufacturerId, createdAt])
+}
+
+model Batch {
+  id             String            @id @default(cuid())
+  productId      String
+  batchCode      String
+  productionDate DateTime?
+  expiryDate     DateTime?
+  quantity       Int               @default(0)
+  product        Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  identities     ProductIdentity[]
+  createdAt      DateTime          @default(now())
+  @@unique([productId, batchCode])
+  @@index([productId])
+}
+
+model ProductIdentity {
+  id                 String         @id @default(cuid())
+  batchId            String
+  publicCode         String         @unique
+  tokenHash          String         @unique
+  status             IdentityStatus @default(ACTIVE)
+  verificationCount  Int            @default(0)
+  firstVerifiedAt    DateTime?
+  lastVerifiedAt     DateTime?
+  batch              Batch          @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  events             VerificationEvent[]
+  issuedAt           DateTime       @default(now())
+  @@index([batchId, status])
+}
+
+model VerificationEvent {
+  id         String          @id @default(cuid())
+  identityId String?
+  outcome    String
+  identity   ProductIdentity? @relation(fields: [identityId], references: [id], onDelete: SetNull)
+  createdAt  DateTime        @default(now())
+  @@index([identityId, createdAt])
+}
