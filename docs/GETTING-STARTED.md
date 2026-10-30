@@ -75,4 +75,4 @@ pnpm --filter @pan/verification-web typecheck
 pnpm --filter @pan/consumer-mobile typecheck
 ```
 
-The first build still needs dependency installation and execution in a real development environment; the repository currently does not include a generated pnpm lockfile.
+GitHub Actions installs the workspace dependencies and typechecks the API and all three client applications on this development branch. A generated pnpm lockfile is not yet committed. Full browser/API integration testing against a running PostgreSQL instance, production builds, and testing on physical Android/iOS devices are still required before launch.
