@@ -1,4 +1,5 @@
-import { Body, Controller, Param, Post, Public, BadRequestException } from "@nestjs/common";
+import { Body, Controller, Param, Post, BadRequestException } from "@nestjs/common";
+import { Public } from "./auth";
 import { Throttle } from "@nestjs/throttler";
 import { createHmac } from "node:crypto";
 import { PrismaService } from "./prisma.service";
