@@ -12,10 +12,25 @@
     },
     "android": {
       "package": "ng.pan.verify",
-      "adaptiveIcon": { "backgroundColor": "#173b32" }
+      "adaptiveIcon": {
+        "backgroundColor": "#173b32"
+      }
     },
     "plugins": [
-      ["expo-camera", { "cameraPermission": "Allow PAN Verify to scan product identity QR codes." }]
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow PAN Verify to scan product identity QR codes."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinVersion": "1.9.25"
+          }
+        }
+      ]
     ]
   }
 }
