@@ -102,12 +102,21 @@ const linkedCartonToken = new URL(cartonOnlyResult.assets[0].verifyUrl).pathname
 const linkedCartonCheck = await request("/v1/verify/" + linkedCartonToken);
 assert(linkedCartonCheck.data.product.packaging.containedUnitCount === 2, "carton-only job should link previously issued units");
 
+const expiredBatch = await request("/v1/products/" + product.data.id + "/batches", { method: "POST", token, body: { batchCode: "EXPIRED-" + suffix, quantity: 1, expiryDate: "2026-01-01T00:00:00.000Z" } });
+assert(expiredBatch.status === 201, "producer should create an expiry-dated batch");
+const expiredJob = await request("/v1/manufacturer/batches/" + expiredBatch.data.id + "/issuance-jobs", { method: "POST", token, body: { unitQuantity: 1, cartonQuantity: 0 } });
+const expiredResult = await waitForJob(expiredJob.data.id, token);
+const expiredToken = new URL(expiredResult.assets[0].verifyUrl).pathname.split("/").filter(Boolean).pop();
+const expiredCheck = await request("/v1/verify/" + expiredToken);
+assert(expiredCheck.data.status === "EXPIRED", "verification should distinguish producer-recorded expiry from counterfeit status");
+
+
 
 
 const overIssue = await request("/v1/manufacturer/batches/" + batch.data.id + "/issuance-jobs", { method: "POST", token, body: { unitQuantity: 1, cartonQuantity: 0 } });
 assert(overIssue.status === 400, "queued issuance must not exceed production quantity");
 const analytics = await request("/v1/analytics/overview", { token });
-assert(analytics.data.products === 1 && analytics.data.batches === 2 && analytics.data.identities === 6 && analytics.data.scans >= 5, "manufacturer analytics should reflect unit and carton identities");
+assert(analytics.data.products === 1 && analytics.data.batches === 3 && analytics.data.identities === 7 && analytics.data.scans >= 6, "manufacturer analytics should reflect unit and carton identities");
 const audit = await request("/v1/admin/audit", { admin: true });
 assert(audit.status === 200 && audit.data.some(x => x.action === "MANUFACTURER_APPROVED" && x.targetId === workspaceId), "producer approval should be auditable");
 
