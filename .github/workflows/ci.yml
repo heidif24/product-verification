@@ -4,6 +4,9 @@ on:
     branches: [main, "feat/**"]
   pull_request:
     branches: [main]
+concurrency:
+  group: pan-quality-checks
+  cancel-in-progress: true
 jobs:
   typecheck-and-smoke:
     runs-on: ubuntu-latest
