@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Put, Delete, Param, Query, Req, UseGuards, BadRequestException, ForbiddenException, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, Get, Post, Put, Delete, Param, Query, Req, UseGuards, Injectable, BadRequestException, ForbiddenException, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import { JwtService } from "@nestjs/jwt";
 import { createHmac, randomBytes } from "node:crypto";
@@ -19,6 +19,7 @@ async function workspaceRole(db: PrismaService, req: AuthRequest, allowed: Role[
   return membership;
 }
 
+@Injectable()
 export class SuperAdminGuard {
   canActivate(context: any) {
     const req = context.switchToHttp().getRequest<AuthRequest>();
