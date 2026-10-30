@@ -116,7 +116,26 @@ export class SuperAdminController {
   @Get("reports")
   async reports(@Query("status") status = "") {
     const where = status ? { status } : {};
-    return this.db.consumerReport.findMany({ where, include: { identity: { include: { batch: { include: { product: { include: { manufacturer: { select: { legalName: true } } } } } } } }, orderBy: { createdAt: "desc" }, take: 150 });
+    return this.db.consumerReport.findMany({
+      where,
+      include: {
+        identity: {
+          include: {
+            batch: {
+              include: {
+                product: {
+                  include: {
+                    manufacturer: { select: { legalName: true } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      orderBy: { createdAt: "desc" },
+      take: 150
+    });
   }
   @Post("reports/:id/status")
   async updateReport(@Param("id") id: string, @Body() body: { status?: string; note?: string }) {
