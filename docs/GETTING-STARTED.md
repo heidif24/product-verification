@@ -59,10 +59,12 @@ New workspaces are pending. After an operator has reviewed the company outside t
 
 ```bash
 curl -X POST http://localhost:4000/api/v1/admin/manufacturers/WORKSPACE_ID/approve \
-  -H "x-pan-admin-key: YOUR_ADMIN_API_KEY"
+  -H "x-pan-admin-key: YOUR_ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"reason":"Company identity and submitted records reviewed"}'
 ```
 
-The API approval endpoint is protected by the separate `ADMIN_API_KEY`; never expose this key to a browser or mobile app.
+The API approval endpoint is protected by the separate `ADMIN_API_KEY`; never expose this key to a browser or mobile app. The same key protects the pending-manufacturer list, identity quarantine/release/revocation actions, and the administrator audit feed. Every approval or identity-state change requires a reason and creates an audit record.
 
 ## Check quality
 
