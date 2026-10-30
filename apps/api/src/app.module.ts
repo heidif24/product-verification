@@ -6,7 +6,7 @@ import { AuthGuard } from "./auth";
 import { PrismaService } from "./prisma.service";
 
 @Module({
-  imports: [JwtModule.register({ secret: process.env.JWT_SECRET || "development-only-change-this-secret-before-deploy", signOptions: { expiresIn: "12h" } })],
+  imports: [JwtModule.register({ secret: process.env.JWT_SECRET!, signOptions: { expiresIn: "12h" } })],
   controllers: [AppController],
   providers: [PrismaService, { provide: APP_GUARD, useClass: AuthGuard }]
 })
