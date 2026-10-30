@@ -258,7 +258,8 @@ export class ManufacturerOperationsController {
     if (!batch) throw new NotFoundException("Production batch not found.");
     const unitQuantity = Number(body.unitQuantity || 0), cartonQuantity = Number(body.cartonQuantity || 0);
     if (!Number.isInteger(unitQuantity) || !Number.isInteger(cartonQuantity) || unitQuantity < 0 || cartonQuantity < 0 || unitQuantity + cartonQuantity < 1 || unitQuantity > 10000 || cartonQuantity > 1000) throw new BadRequestException("Request up to 10,000 individual-unit codes and 1,000 carton codes per job.");
-    if (cartonQuantity > 0 && (!batch.unitsPerCarton || unitQuantity !== cartonQuantity * batch.unitsPerCarton)) throw new BadRequestException("Carton issuance must include exactly the configured number of unit identities per carton. Issue loose units separately.");
+    if (cartonQuantity > 0 && !batch.unitsPerCarton) throw new BadRequestException("Configure units per carton on the production batch before issuing carton identities.");
+    if (cartonQuantity > 0 && unitQuantity > 0 && unitQuantity !== cartonQuantity * batch.unitsPerCarton!) throw new BadRequestException("When issuing new units and cartons together, unit quantity must equal cartons multiplied by units per carton.");
     return this.db.$transaction(async tx => {
       const [currentUnits, currentCartons, pending] = await Promise.all([
         tx.productIdentity.count({ where: { batchId: id, level: "UNIT" } }),
@@ -267,6 +268,10 @@ export class ManufacturerOperationsController {
       ]);
       if (currentUnits + (pending._sum.unitQuantity || 0) + unitQuantity > batch.quantity) throw new BadRequestException("The requested unit identities exceed the production quantity remaining, including queued jobs.");
       if (cartonQuantity > 0 && (batch.cartonCount === null || currentCartons + (pending._sum.cartonQuantity || 0) + cartonQuantity > batch.cartonCount)) throw new BadRequestException("The requested carton identities exceed the number of cartons recorded for this batch.");
+      if (cartonQuantity > 0 && unitQuantity === 0) {
+        const unassignedUnits = await tx.productIdentity.count({ where: { batchId: id, level: "UNIT", parentId: null } });
+        if (unassignedUnits < cartonQuantity * batch.unitsPerCarton!) throw new BadRequestException("There are not enough unassigned individual-unit identities to fill these cartons. Issue the unit identities first, then create the carton codes.");
+      }
       return tx.issuanceJob.create({ data: { manufacturerId: req.user.manufacturerId, batchId: id, createdById: req.user.sub, unitQuantity, cartonQuantity } });
     }, { isolationLevel: "Serializable" });
   }
