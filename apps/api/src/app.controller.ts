@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post, Req, UseGuards, BadRequestException, NotFoundException, ConflictException, ForbiddenException, Query } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
+import { Throttle } from "@nestjs/throttler";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import * as bcrypt from "bcryptjs";
 import * as QRCode from "qrcode";
@@ -26,6 +27,7 @@ export class AppController {
 
   @Post("v1/auth/register")
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async register(@Body() body: { fullName?: string; email?: string; password?: string; companyName?: string }) {
     const fullName = body.fullName?.trim(), email = body.email?.trim().toLowerCase(), password = body.password ?? "", companyName = body.companyName?.trim();
     if (!fullName || !email || !companyName || password.length < 10) throw new BadRequestException("Enter your name, company, valid email and a password of at least 10 characters.");
@@ -62,6 +64,7 @@ export class AppController {
 
   @Post("v1/auth/resend-verification")
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async resendVerification(@Body() body: { email?: string }) {
     const email = body.email?.trim().toLowerCase();
     if (email) {
@@ -79,6 +82,7 @@ export class AppController {
 
   @Post("v1/auth/forgot-password")
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async forgotPassword(@Body() body: { email?: string }) {
     const email = body.email?.trim().toLowerCase();
     if (email) {
@@ -97,6 +101,7 @@ export class AppController {
 
   @Post("v1/auth/reset-password")
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async resetPassword(@Body() body: { token?: string; password?: string }) {
     if (!body.token || !body.password || body.password.length < 10) throw new BadRequestException("A valid reset token and a password of at least 10 characters are required.");
     const token = await this.db.verificationToken.findUnique({ where: { tokenHash: tokenDigest(body.token) } });
@@ -111,6 +116,7 @@ export class AppController {
 
   @Post("v1/auth/login")
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async login(@Body() body: { email?: string; password?: string }) {
     const email = body.email?.trim().toLowerCase();
     if (!email || !body.password) throw new BadRequestException("Email and password are required.");
@@ -282,6 +288,7 @@ export class AppController {
 
   @Get("v1/verify/code/:code")
   @Public()
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
   async verifyCode(@Param("code") code: string) {
     const identity = await this.db.productIdentity.findUnique({ where: { publicCode: code.trim().toUpperCase() }, include: { batch: { include: { product: { include: { manufacturer: true } } } }, carton: { select: { publicCode: true } }, _count: { select: { containedUnits: true } } } });
     if (!identity) throw new NotFoundException("This product ID is not recognised.");
@@ -297,6 +304,7 @@ export class AppController {
 
   @Get("v1/verify/:token")
   @Public()
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
   async verify(@Param("token") token: string) {
     if (!/^[A-Za-z0-9_-]{30,60}$/.test(token)) throw new NotFoundException("This product identity is not recognised.");
     const identity = await this.db.productIdentity.findUnique({ where: { tokenHash: tokenDigest(token) }, include: { batch: { include: { product: { include: { manufacturer: true } } } }, carton: { select: { publicCode: true } }, _count: { select: { containedUnits: true } } } });
