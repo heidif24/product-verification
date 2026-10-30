@@ -59,14 +59,14 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
         unitAssets.push({ code, level: "UNIT", verifyUrl: baseUrl + "/v/" + token, parentCode: carton?.code || null });
       }
       await this.db.issuanceJob.update({ where: { id: jobId }, data: { progress: 25 } });
+      assets.push(...unitAssets);
+      const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+      const ciphertext = encrypt({ assets, product: job.batch.product.name, batchCode: job.batch.batchCode, expiresAt: expiresAt.toISOString() });
       await this.db.$transaction(async tx => {
         if (cartons.length) await tx.productIdentity.createMany({ data: cartons.map(c => ({ id: c.id, batchId: job.batchId, publicCode: c.code, tokenHash: digest(c.token), level: "CARTON" })) });
         for (let offset = 0; offset < unitRecords.length; offset += 1000) await tx.productIdentity.createMany({ data: unitRecords.slice(offset, offset + 1000) });
-        await tx.issuanceJob.update({ where: { id: jobId }, data: { progress: 90 } });
+        await tx.issuanceJob.update({ where: { id: jobId }, data: { status: "COMPLETED", progress: 100, resultCiphertext: ciphertext, expiresAt } });
       }, { timeout: 120000 });
-      assets.push(...unitAssets);
-      const ciphertext = encrypt({ assets, product: job.batch.product.name, batchCode: job.batch.batchCode, expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString() });
-      await this.db.issuanceJob.update({ where: { id: jobId }, data: { status: "COMPLETED", progress: 100, resultCiphertext: ciphertext, expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000) } });
     } catch (error) {
       this.logger.error("Issuance job failed: " + jobId, error instanceof Error ? error.stack : String(error));
       await this.db.issuanceJob.update({ where: { id: jobId }, data: { status: "FAILED", errorMessage: "Issuance could not be completed. Contact PAN support with the job reference." } }).catch(() => undefined);
