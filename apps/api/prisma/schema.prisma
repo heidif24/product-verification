@@ -7,10 +7,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum ManufacturerStatus { PENDING APPROVED SUSPENDED }
-enum MembershipRole { OWNER ADMIN OPERATOR ANALYST }
-enum ProductStatus { DRAFT ACTIVE ARCHIVED }
-enum IdentityStatus { ACTIVE QUARANTINED REVOKED }
+enum ManufacturerStatus {\n  PENDING\n  APPROVED\n  SUSPENDED\n}
+enum MembershipRole {\n  OWNER\n  ADMIN\n  OPERATOR\n  ANALYST\n}
+enum ProductStatus {\n  DRAFT\n  ACTIVE\n  ARCHIVED\n}
+enum IdentityStatus {\n  ACTIVE\n  QUARANTINED\n  REVOKED\n}
 
 model User {
   id           String       @id @default(cuid())
