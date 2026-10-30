@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
-    "lint": "turbo lint",
+    "lint": "turbo run typecheck",
     "typecheck": "turbo typecheck"
   },
   "devDependencies": {
