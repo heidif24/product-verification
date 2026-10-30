@@ -60,7 +60,7 @@ export default function Dashboard() {
       <section className="main-area">
         <header className="topbar">
           <div className="crumb"><span>Workspace</span><span className="slash">/</span><strong>{active}</strong></div>
-          <div className="top-actions"><div className="searchbox"><Search size={15}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search anything..." /></div><button className="icon-button notification" aria-label="Notifications"><Bell size={18}/><i/></button><div className="top-divider"/><div className="user-mini">FO</div></div>
+          <div className="top-actions"><div className="searchbox"><Search size={15}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search anything..." /></div><button className="icon-button notification" aria-label="Notifications"><Bell size={18}/><i/></button><div className="top-divider"/><div className="user-mini">FO</div><a href="/portal" className="button button-primary" style={{height:36,padding:"0 12px",fontSize:11}}>Open live portal ↗</a></div>
         </header>
 
         <div className="content">

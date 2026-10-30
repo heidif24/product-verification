@@ -1,0 +1,58 @@
+name: PAN quality checks
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+jobs:
+  typecheck-and-smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pan
+          POSTGRES_PASSWORD: pan_local_password
+          POSTGRES_DB: pan
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pan -d pan"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://pan:pan_local_password@localhost:5432/pan?schema=public
+      JWT_SECRET: ci-only-jwt-secret-0123456789-abcdefghijklmnopqrstuvwxyz
+      TOKEN_PEPPER: ci-only-token-pepper-0123456789-abcdefghijklmnopqrstuvwxyz
+      ADMIN_API_KEY: ci-only-admin-key-0123456789-abcdefghijklmnopqrstuvwxyz
+      PUBLIC_VERIFY_URL: http://localhost:3001
+      CORS_ORIGINS: http://localhost:3000,http://localhost:3001
+      PORT: 4000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm --filter @pan/api typecheck
+      - run: pnpm --filter @pan/api db:deploy
+      - name: Start PAN API
+        run: pnpm --filter @pan/api dev > /tmp/pan-api.log 2>&1 &
+      - name: Wait for API
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:4000/api/health >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/pan-api.log
+          exit 1
+      - name: Run end-to-end API smoke test
+        run: |
+          pnpm --filter @pan/api smoke || { cat /tmp/pan-api.log; exit 1; }
+      - run: pnpm --filter @pan/manufacturer-web typecheck
+      - run: pnpm --filter @pan/verification-web typecheck
+      - run: pnpm --filter @pan/consumer-mobile typecheck

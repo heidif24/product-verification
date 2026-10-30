@@ -1,12 +1,21 @@
 {
   "expo": {
-    "name":"PAN Verify",
-    "slug":"pan-verify",
-    "scheme":"panverify",
-    "version":"0.1.0",
-    "orientation":"portrait",
-    "userInterfaceStyle":"light",
-    "ios":{"supportsTablet":true,"bundleIdentifier":"ng.pan.verify"},
-    "android":{"package":"ng.pan.verify","adaptiveIcon":{"backgroundColor":"#173b32"}}
+    "name": "PAN Verify",
+    "slug": "pan-verify",
+    "scheme": "panverify",
+    "version": "0.2.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ng.pan.verify"
+    },
+    "android": {
+      "package": "ng.pan.verify",
+      "adaptiveIcon": { "backgroundColor": "#173b32" }
+    },
+    "plugins": [
+      ["expo-camera", { "cameraPermission": "Allow PAN Verify to scan product identity QR codes." }]
+    ]
   }
 }
