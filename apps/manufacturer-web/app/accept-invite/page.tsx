@@ -1,4 +1,5 @@
 "use client";
+import "../auth-flow.css";
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 const API = process.env.NEXT_PUBLIC_PAN_API_URL || "http://localhost:4000/api";
