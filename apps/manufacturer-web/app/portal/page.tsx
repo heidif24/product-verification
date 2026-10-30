@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";\nimport JSZip from "jszip";
+import { useEffect, useState, type FormEvent } from "react";
+import JSZip from "jszip";
 import "./portal.css";
 
 const API = process.env.NEXT_PUBLIC_PAN_API_URL || "http://localhost:4000/api";
