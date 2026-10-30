@@ -10,6 +10,7 @@ This checklist distinguishes implemented application workflows from the infrastr
 - GitHub Actions runs API smoke tests, TypeScript checks, web builds and an Android emulator journey.
 - The Vercel account currently has a linked `manufacturer-web` project only. Its environment-variable list is empty, its deployment is a preview rather than production, and preview deployments are protected by Vercel SSO.
 - No production API host, managed production database, production object-storage bucket, SMTP account, public PAN domain or production secrets have been configured in the connected deployment environment.
+- The repository does not yet contain a committed `pnpm-lock.yaml`; CI and the Vercel install command currently permit lockfile regeneration. Commit and review the resolved lockfile, then switch CI and Vercel to frozen installs before production.
 - Privacy notice and platform terms are explicitly drafts pending Nigerian legal review.
 
 ## Infrastructure required
