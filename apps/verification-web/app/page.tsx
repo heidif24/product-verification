@@ -18,6 +18,6 @@ export default function VerifyHome() {
       </form>
       <div className="verify-note"><Info size={16}/><span>A PAN identity helps you check a product record. It is not, by itself, a laboratory test or a guarantee of the physical contents.</span></div>
     </section>
-    <footer className="verify-footer"><span>© 2026 Product Authentication Network</span><span>Built for trust. Designed for everyone.</span></footer>
+    <footer className="verify-footer"><span>© 2026 Product Authentication Network</span><span><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · Built for trust.</span></footer>
   </main>;
 }
