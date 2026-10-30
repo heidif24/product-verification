@@ -88,6 +88,9 @@ const repeat = await request("/v1/verify/" + unitToken);
 assert(repeat.data.status === "PREVIOUSLY_SCANNED", "repeat scan should be distinguished without claiming counterfeit");
 const manual = await request("/v1/verify/code/" + units[1].code);
 assert(manual.status === 200 && manual.data.product.packaging.cartonCode === carton.code, "manual unit lookup should preserve carton relationship");
+const concern = await request("/v1/verify/code/" + units[1].code + "/report", { method: "POST", body: { reason: "PRODUCT_MISMATCH", details: "The printed product details do not match the information shown by the PAN identity check." } });
+assert(concern.status === 201 && concern.data.reference, "consumer should be able to report a product concern");
+
 
 const looseBatch = await request("/v1/products/" + product.data.id + "/batches", { method: "POST", token, body: { batchCode: "LOOSE-" + suffix, quantity: 2, cartonCount: 1, unitsPerCarton: 2 } });
 assert(looseBatch.status === 201, "producer should create a second carton-configured batch");
@@ -124,6 +127,10 @@ const adminLogin = await request("/v1/super-admin/auth/login", { method: "POST",
 assert(adminLogin.status === 201 && adminLogin.data.accessToken, "separate super administrator login should succeed");
 const adminOverview = await request("/v1/super-admin/overview", { token: adminLogin.data.accessToken });
 assert(adminOverview.status === 200 && adminOverview.data.companies >= 1, "super administrator should access the network overview");
+const reportQueue = await request("/v1/super-admin/reports", { token: adminLogin.data.accessToken });
+assert(reportQueue.status === 200 && reportQueue.data.some(x => x.id === concern.data.reference), "super administrator should review consumer reports");
+const reportUpdate = await request("/v1/super-admin/reports/" + concern.data.reference + "/status", { method: "POST", token: adminLogin.data.accessToken, body: { status: "IN_REVIEW", note: "Checking the producer batch and label placement." } });
+assert(reportUpdate.status === 201 && reportUpdate.data.status === "IN_REVIEW", "consumer report review should be audited");
 const privacyRequest = await request("/v1/privacy/requests", { method: "POST", body: { email: "privacy-" + suffix + "@pan.test", requestType: "ACCESS", details: "Please provide information associated with my PAN account." } });
 assert(privacyRequest.status === 201 && privacyRequest.data.reference, "public privacy rights request should be recorded");
 const privacyQueue = await request("/v1/super-admin/privacy-requests", { token: adminLogin.data.accessToken });
