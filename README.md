@@ -1,20 +1,35 @@
 # Product Authentication Network (PAN)
 
-A product identity and verification platform. One secure digital identity for every individual physical product unit.
+A product identity and verification platform designed to give every individual product unit a secure digital identity.
 
-## Experience surfaces
-- **Manufacturer portal** — onboarding, product catalogue, production batches, identity issuance and scan intelligence.
-- **Consumer app** — Android and iOS scanning, verification, history and reporting.
-- **Public verification** — mobile-first browser verification; no app or account required.
+## Applications
 
-## Architecture
-A TypeScript monorepo with Next.js web applications, Expo / React Native mobile, a NestJS API, PostgreSQL, Redis-backed jobs and shared contracts. See [System architecture](docs/SYSTEM-ARCHITECTURE.md) and [Product specification](docs/PRODUCT-SPECIFICATION.md).
+- **Manufacturer portal** — account creation, product catalogue, production batches, QR identity issuance and export.
+- **Consumer mobile app** — Android/iOS QR scanning, manual code lookup and plain-language verification results.
+- **Public verification website** — browser-based QR and manual-code verification without an account or app installation.
+- **PAN API** — shared NestJS API and PostgreSQL data store. This is the platform backend, not a fourth user-facing application.
 
-## Design direction
-PAN uses a calm, premium visual language: deep forest, warm ivory, sage and restrained brass. Interfaces prioritise clarity, trust, accessible contrast and excellent responsive behaviour.
+## Current implementation
 
-## Status
-Foundation phase. The manufacturer dashboard is an interactive visual prototype using illustrative data; it is not yet connected to production services. No real product is certified by this prototype.
+The `feat/pan-functional-core` branch contains the first connected end-to-end vertical slice:
 
-## Development
-See [Getting started](docs/GETTING-STARTED.md). Never commit secrets or real consumer data.
+1. A manufacturer creates an account and a pending workspace.
+2. The manufacturer signs in and manages products and production batches.
+3. The manufacturer issues unique per-unit identities, with QR images and a CSV export.
+4. A consumer scans the QR with a phone camera or enters the printed PAN ID.
+5. The API checks the identity record and returns a consumer-facing result.
+6. Manufacturer approval is required before an identity is described as normally verified.
+
+The dashboard at the root of the manufacturer app remains a visual prototype using illustrative data. The working manufacturer console is at `/portal`.
+
+## Local development
+
+- Node.js 20.11+
+- pnpm 9.15.4
+- Docker Desktop / Docker Engine
+
+See [Getting started](docs/GETTING-STARTED.md) and [API setup](apps/api/README.md). Never commit secrets or real consumer data.
+
+## Important limitations
+
+This is an MVP development build, not a production-ready anti-counterfeiting certification service. Email verification/recovery, full administrator console, identity quarantine/revocation controls, rate limiting, audit review, large asynchronous issuance, deployment configuration, security testing and Nigerian NDPA review remain outstanding. A PAN QR identity confirms a database record, not the physical contents, product quality, or NAFDAC/SON approval.
