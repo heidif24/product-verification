@@ -14,7 +14,7 @@ export default function VerifyHome() {
       <div className="scan-card"><div className="scan-illustration"><div className="scan-frame"><ScanLine size={45} strokeWidth={1.25}/><i className="scan-corner tl"/><i className="scan-corner tr"/><i className="scan-corner bl"/><i className="scan-corner br"/></div></div><div className="scan-copy"><b>Ready to verify?</b><span>Open your camera and point it at the product’s QR code. The result opens here automatically.</span><small>No account or app installation needed.</small></div></div>
       <div className="verify-divider"><span>OR</span></div>
       <form className="manual-entry" onSubmit={e=>{e.preventDefault();if(code.trim())router.push("/code/"+encodeURIComponent(code.trim().toUpperCase()))}}>
-        <label htmlFor="identity">ENTER A PRODUCT ID</label><div><input id="identity" value={code} onChange={e=>setCode(e.target.value)} placeholder="e.g. PAN-0123456789ABCDEF" required/><button type="submit">Verify <ArrowUpRight size={15}/></button></div><small>Enter the PAN identity printed beside the QR code.</small>
+        <label htmlFor="identity">ENTER A PRODUCT ID</label><div><input id="identity" value={code} onChange={e=>setCode(e.target.value)} placeholder="e.g. PAN-0123456789ABCDEF0123" required/><button type="submit">Verify <ArrowUpRight size={15}/></button></div><small>Enter the PAN identity printed beside the QR code.</small>
       </form>
       <div className="verify-note"><Info size={16}/><span>A PAN identity helps you check a product record. It is not, by itself, a laboratory test or a guarantee of the physical contents.</span></div>
     </section>
