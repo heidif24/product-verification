@@ -14,6 +14,12 @@ const tokenDigest = (token: string) => createHmac("sha256", process.env.TOKEN_PE
 export class AppController {
   constructor(private db: PrismaService, private jwt: JwtService) {}
 
+  private async assertWorkspaceRole(req: AuthRequest, allowed: string[]) {
+    const membership = await this.db.membership.findUnique({ where: { userId_manufacturerId: { userId: req.user.sub, manufacturerId: req.user.manufacturerId } } });
+    if (!membership || !allowed.includes(membership.role)) throw new ForbiddenException("Your workspace role does not permit this action.");
+    return membership;
+  }
+
   @Get("health")
   @Public()
   health() { return { status: "ok", service: "pan-api", timestamp: new Date().toISOString() }; }
@@ -204,10 +210,11 @@ export class AppController {
 
   @Post("v1/products")
   @UseGuards(AuthGuard)
-  async createProduct(@Req() req: AuthRequest, @Body() body: { name?: string; brand?: string; category?: string; description?: string }) {
+  async createProduct(@Req() req: AuthRequest, @Body() body: { name?: string; brand?: string; category?: string; description?: string; nafdacRegistrationNumber?: string; sonCertificateNumber?: string }) {
+    await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR"]);
     const name = body.name?.trim();
     if (!name) throw new BadRequestException("Product name is required.");
-    return this.db.product.create({ data: { manufacturerId: req.user.manufacturerId, name, brand: body.brand?.trim() || null, category: body.category?.trim() || null, description: body.description?.trim() || null } });
+    return this.db.product.create({ data: { manufacturerId: req.user.manufacturerId, name, brand: body.brand?.trim() || null, category: body.category?.trim() || null, description: body.description?.trim() || null, nafdacRegistrationNumber: body.nafdacRegistrationNumber?.trim() || null, sonCertificateNumber: body.sonCertificateNumber?.trim() || null } });
   }
 
   @Get("v1/products/:id/batches")
@@ -220,15 +227,19 @@ export class AppController {
 
   @Post("v1/products/:id/batches")
   @UseGuards(AuthGuard)
-  async createBatch(@Req() req: AuthRequest, @Param("id") id: string, @Body() body: { batchCode?: string; productionDate?: string; expiryDate?: string; quantity?: number }) {
+  async createBatch(@Req() req: AuthRequest, @Param("id") id: string, @Body() body: { batchCode?: string; productionDate?: string; expiryDate?: string; quantity?: number; cartonCount?: number; unitsPerCarton?: number }) {
+    await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR"]);
     const product = await this.db.product.findFirst({ where: { id, manufacturerId: req.user.manufacturerId } });
     if (!product) throw new NotFoundException("Product not found");
     const batchCode = body.batchCode?.trim();
     if (!batchCode) throw new BadRequestException("Batch reference is required.");
     const quantity = Number(body.quantity ?? 0);
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10000000) throw new BadRequestException("Production quantity must be a whole number greater than zero.");
+    const cartonCount = body.cartonCount === undefined || body.cartonCount === null ? null : Number(body.cartonCount);
+    const unitsPerCarton = body.unitsPerCarton === undefined || body.unitsPerCarton === null ? null : Number(body.unitsPerCarton);
+    if ((cartonCount === null) !== (unitsPerCarton === null) || (cartonCount !== null && (!Number.isInteger(cartonCount) || cartonCount < 1 || !Number.isInteger(unitsPerCarton) || unitsPerCarton! < 1 || cartonCount * unitsPerCarton! !== quantity))) throw new BadRequestException("Carton count and units per carton must both be provided, and their product must equal the production quantity.");
     try {
-      return await this.db.batch.create({ data: { productId: id, batchCode, quantity, productionDate: body.productionDate ? new Date(body.productionDate) : null, expiryDate: body.expiryDate ? new Date(body.expiryDate) : null } });
+      return await this.db.batch.create({ data: { productId: id, batchCode, quantity, cartonCount, unitsPerCarton, productionDate: body.productionDate ? new Date(body.productionDate) : null, expiryDate: body.expiryDate ? new Date(body.expiryDate) : null } });
     } catch (error: any) {
       if (error?.code === "P2002") throw new ConflictException("That batch reference already exists for this product.");
       throw error;
@@ -238,6 +249,7 @@ export class AppController {
   @Post("v1/batches/:id/identities")
   @UseGuards(AuthGuard)
   async issue(@Req() req: AuthRequest, @Param("id") id: string, @Body() body: { quantity?: number }) {
+    await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR"]);
     const batch = await this.db.batch.findFirst({ where: { id, product: { manufacturerId: req.user.manufacturerId } }, include: { product: true } });
     if (!batch) throw new NotFoundException("Batch not found");
     const quantity = Number(body.quantity);
@@ -267,7 +279,7 @@ export class AppController {
   @Get("v1/verify/code/:code")
   @Public()
   async verifyCode(@Param("code") code: string) {
-    const identity = await this.db.productIdentity.findUnique({ where: { publicCode: code.trim().toUpperCase() }, include: { batch: { include: { product: { include: { manufacturer: true } } } } } });
+    const identity = await this.db.productIdentity.findUnique({ where: { publicCode: code.trim().toUpperCase() }, include: { batch: { include: { product: { include: { manufacturer: true } } } }, carton: { select: { publicCode: true } }, _count: { select: { containedUnits: true } } } });
     if (!identity) throw new NotFoundException("This product ID is not recognised.");
     const now = new Date();
     const outcome = identity.status === "REVOKED" ? "REVOKED" : identity.status === "QUARANTINED" ? "UNDER_REVIEW" : identity.batch.product.manufacturer.status !== "APPROVED" ? "MANUFACTURER_PENDING" : identity.firstVerifiedAt !== null ? "PREVIOUSLY_SCANNED" : "VERIFIED";
@@ -276,14 +288,14 @@ export class AppController {
       this.db.verificationEvent.create({ data: { identityId: identity.id, outcome: "MANUAL_" + outcome } })
     ]);
     const batch = identity.batch; const product = batch.product;
-    return { status: outcome, title: outcome === "VERIFIED" ? "Product identity verified" : outcome === "PREVIOUSLY_SCANNED" ? "This identity has been scanned before" : outcome === "UNDER_REVIEW" ? "Product under review" : outcome === "MANUFACTURER_PENDING" ? "Manufacturer review pending" : "Identity revoked", message: outcome === "VERIFIED" ? "This code matches an active identity in the PAN network. No known issue has been recorded for this identity." : outcome === "PREVIOUSLY_SCANNED" ? "This code has been checked before. This is not proof of counterfeiting; compare the product details and contact the manufacturer if anything looks unusual." : outcome === "UNDER_REVIEW" ? "This identity is temporarily under review. Contact the manufacturer before relying on this product." : outcome === "MANUFACTURER_PENDING" ? "This code matches an identity record, but the manufacturer has not yet completed PAN approval. This is not a PAN endorsement of the product." : "This identity is no longer active in the PAN network.", product: { name: product.name, brand: product.brand, category: product.category, manufacturer: product.manufacturer.legalName, batchCode: batch.batchCode, productionDate: batch.productionDate, expiryDate: batch.expiryDate }, checkedAt: now.toISOString(), scansRecorded: identity.verificationCount + 1 };
+    return { status: outcome, title: outcome === "VERIFIED" ? "Product identity verified" : outcome === "PREVIOUSLY_SCANNED" ? "This identity has been scanned before" : outcome === "UNDER_REVIEW" ? "Product under review" : outcome === "MANUFACTURER_PENDING" ? "Manufacturer review pending" : "Identity revoked", message: outcome === "VERIFIED" ? "This code matches an active identity in the PAN network. No known issue has been recorded for this identity." : outcome === "PREVIOUSLY_SCANNED" ? "This code has been checked before. This is not proof of counterfeiting; compare the product details and contact the manufacturer if anything looks unusual." : outcome === "UNDER_REVIEW" ? "This identity is temporarily under review. Contact the manufacturer before relying on this product." : outcome === "MANUFACTURER_PENDING" ? "This code matches an identity record, but the manufacturer has not yet completed PAN approval. This is not a PAN endorsement of the product." : "This identity is no longer active in the PAN network.", product: { name: product.name, brand: product.brand, category: product.category, manufacturer: product.manufacturer.legalName, batchCode: batch.batchCode, productionDate: batch.productionDate, expiryDate: batch.expiryDate, packaging: { identityLevel: identity.level, cartonCode: identity.carton?.publicCode ?? null, containedUnitCount: identity.level === "CARTON" ? identity._count.containedUnits : null }, regulatoryReferences: { nafdacRegistrationNumber: product.nafdacRegistrationNumber, sonCertificateNumber: product.sonCertificateNumber, source: "PRODUCER_PROVIDED_NOT_VERIFIED_BY_PAN" } }, checkedAt: now.toISOString(), scansRecorded: identity.verificationCount + 1 };
   }
 
   @Get("v1/verify/:token")
   @Public()
   async verify(@Param("token") token: string) {
     if (!/^[A-Za-z0-9_-]{30,60}$/.test(token)) throw new NotFoundException("This product identity is not recognised.");
-    const identity = await this.db.productIdentity.findUnique({ where: { tokenHash: tokenDigest(token) }, include: { batch: { include: { product: { include: { manufacturer: true } } } } } });
+    const identity = await this.db.productIdentity.findUnique({ where: { tokenHash: tokenDigest(token) }, include: { batch: { include: { product: { include: { manufacturer: true } } } }, carton: { select: { publicCode: true } }, _count: { select: { containedUnits: true } } } });
     if (!identity) {
       await this.db.verificationEvent.create({ data: { outcome: "NOT_RECOGNISED" } });
       return { status: "NOT_RECOGNISED", title: "Identity not recognised", message: "We could not find this code in the PAN network. Check that you scanned the code on the product itself." };
@@ -299,7 +311,7 @@ export class AppController {
       status: outcome,
       title: outcome === "VERIFIED" ? "Product identity verified" : outcome === "PREVIOUSLY_SCANNED" ? "This identity has been scanned before" : outcome === "UNDER_REVIEW" ? "Product under review" : outcome === "MANUFACTURER_PENDING" ? "Manufacturer review pending" : "Identity revoked",
       message: outcome === "VERIFIED" ? "This code matches an active identity in the PAN network. No known issue has been recorded for this identity." : outcome === "PREVIOUSLY_SCANNED" ? "This code has been checked before. This is not proof of counterfeiting; compare the product details and contact the manufacturer if anything looks unusual." : outcome === "UNDER_REVIEW" ? "This identity is temporarily under review. Contact the manufacturer before relying on this product." : outcome === "MANUFACTURER_PENDING" ? "This code matches an identity record, but the manufacturer has not yet completed PAN approval. This is not a PAN endorsement of the product." : "This identity is no longer active in the PAN network.",
-      product: { name: product.name, brand: product.brand, category: product.category, manufacturer: product.manufacturer.legalName, batchCode: batch.batchCode, productionDate: batch.productionDate, expiryDate: batch.expiryDate },
+      product: { name: product.name, brand: product.brand, category: product.category, manufacturer: product.manufacturer.legalName, batchCode: batch.batchCode, productionDate: batch.productionDate, expiryDate: batch.expiryDate, packaging: { identityLevel: identity.level, cartonCode: identity.carton?.publicCode ?? null, containedUnitCount: identity.level === "CARTON" ? identity._count.containedUnits : null }, regulatoryReferences: { nafdacRegistrationNumber: product.nafdacRegistrationNumber, sonCertificateNumber: product.sonCertificateNumber, source: "PRODUCER_PROVIDED_NOT_VERIFIED_BY_PAN" } },
       checkedAt: now.toISOString(),
       scansRecorded: identity.verificationCount + 1
     };
