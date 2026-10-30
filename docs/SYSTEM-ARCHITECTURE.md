@@ -28,13 +28,15 @@ Producer registration -> email verification -> pending workspace -> company prof
 
 Company workspaces have Owner, Admin, Operator and Analyst roles. A separate super-admin console reviews producer workspaces and documents, manages identity state and handles privacy requests. Privileged actions require reasons and create audit records.
 
+The manufacturer root route (/) redirects to the live manufacturer workspace (/portal). No illustrative dashboard, sample company, fake scan count or hard-coded demo activity is served as a user-facing route.
+
 ## Identity hierarchy
 
 - Individual unit: PANU-… code and its own QR token.
 - Outer carton: PANC-… code and its own QR token.
-- A carton identity links to the unit identities packed inside it. The system supports creating both levels together or creating carton codes later for previously issued, unassigned unit identities.
+- A carton identity links to the unit identities packed inside it. The system supports creating both levels together or creating carton codes later for previously issued, unassigned units.
 - Batch quantity and carton configuration are checked before jobs are accepted. Issuance writes carton and unit identities transactionally.
-- Bearer URLs are encrypted at rest in the temporary export payload and are available for 48 hours to the job creator or workspace administrators.
+- Bearer URLs are encrypted at rest in the temporary export payload and expire after 48 hours to the job creator or workspace administrators.
 
 Manufacturers remain responsible for applying each generated QR label to the correct physical packaging. PAN generates digital identity and print assets; it does not print, apply or inspect labels.
 
@@ -56,6 +58,6 @@ Public verification does not require a consumer account or precise location. The
 
 The current privacy and terms pages are drafts. Before production, PAN must complete Nigerian data-protection/legal review, determine NDPA/NDPC registration and audit obligations, document retention and lawful bases, assess cross-border hosting and complete a DPIA where required.
 
-## Known production gaps
+## Production release gates
 
-Production hosting and secret management, SMTP and private S3 credentials, virus scanning of uploaded documents, full browser/device acceptance testing, independent penetration testing, disaster recovery and a formal incident-response process remain launch gates. The original manufacturer dashboard at / still contains illustrative demo data; the functional console is /portal.
+Production hosting and secret management, SMTP and private S3 credentials, malware scanning of uploaded documents, full browser/device acceptance testing, independent penetration testing, disaster recovery, privacy/legal approval and a formal incident-response process remain launch gates. A preview deployment is not a production release.
