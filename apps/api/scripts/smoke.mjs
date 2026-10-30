@@ -17,9 +17,13 @@ const registration = await request("/v1/auth/register", {
   body: { fullName: "PAN CI Smoke Test", companyName: "PAN Test Manufacturer " + suffix, email: "smoke-" + suffix + "@pan.test", password: "Smoke-test-password-2026!" }
 });
 assert(registration.status >= 200 && registration.status < 300, `manufacturer registration should succeed; HTTP ${registration.status}: ${JSON.stringify(registration.data)}`);
-const token = registration.data.accessToken;
-const workspaceId = registration.data.workspace?.id;
-assert(token && workspaceId, "registration should return an authenticated workspace");
+assert(registration.data.verificationRequired && registration.data.testVerificationToken, "registration should require email verification in the test environment");
+const verification = await request("/v1/auth/verify-email", { method: "POST", body: { token: registration.data.testVerificationToken } });
+assert(verification.status === 200 && verification.data.verified, "email verification should activate the account");
+const login = await request("/v1/auth/login", { method: "POST", body: { email: "smoke-" + suffix + "@pan.test", password: "Smoke-test-password-2026!" } });
+const token = login.data.accessToken;
+const workspaceId = login.data.workspace?.id;
+assert(login.status >= 200 && login.status < 300 && token && workspaceId, "verified manufacturer should be able to sign in");
 
 const profile = await request("/v1/manufacturer/me", { token });
 assert(profile.data.status === "PENDING", "new manufacturer should start pending");
@@ -64,7 +68,6 @@ assert(analytics.data.products === 1 && analytics.data.batches === 1 && analytic
 const audit = await request("/v1/admin/audit", { admin: true });
 assert(audit.status === 200 && audit.data.some(x => x.action === "MANUFACTURER_APPROVED" && x.targetId === workspaceId), "administrator approval should be auditable");
 
-const login = await request("/v1/auth/login", { method: "POST", body: { email: "smoke-" + suffix + "@pan.test", password: "Smoke-test-password-2026!" } });
-assert(login.status >= 200 && login.status < 300 && login.data.accessToken, "manufacturer should be able to sign in");
+
 
 console.log("PAN end-to-end API smoke test passed: registration, login, product, batch, issuance, pending/approved verification, repeat scan, manual lookup, quantity guard, analytics and audit log.");
