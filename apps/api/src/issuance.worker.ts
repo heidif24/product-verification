@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
-import { createCipheriv, createHmac, randomBytes } from "node:crypto";
+import { createCipheriv, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { PrismaService } from "./prisma.service";
 import * as QRCode from "qrcode";
 
@@ -43,11 +43,11 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
       const assets: ExportAsset[] = [];
       for (let i = 0; i < job.cartonQuantity; i++) {
         const token = randomBytes(32).toString("base64url"), code = "PANC-" + randomBytes(10).toString("hex").toUpperCase();
-        cartons.push({ id: "", code, token });
+        cartons.push({ id: randomUUID(), code, token });
       }
       if (cartons.length) {
         const created = await this.db.productIdentity.createManyAndReturn({
-          data: cartons.map(c => ({ batchId: job.batchId, publicCode: c.code, tokenHash: digest(c.token), level: "CARTON" }))
+          data: cartons.map(c => ({ id: c.id, batchId: job.batchId, publicCode: c.code, tokenHash: digest(c.token), level: "CARTON" }))
         });
         cartons.forEach((c, i) => { c.id = created[i].id; assets.push({ code: c.code, level: "CARTON", verifyUrl: baseUrl + "/v/" + c.token, parentCode: null }); });
       }
@@ -55,7 +55,7 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
       const unitAssets: ExportAsset[] = [];
       for (let i = 0; i < job.unitQuantity; i++) {
         const token = randomBytes(32).toString("base64url"), code = "PANU-" + randomBytes(10).toString("hex").toUpperCase();
-        const cartonIndex = job.cartonQuantity > 0 ? Math.floor(i / Math.max(1, Math.ceil(job.unitQuantity / job.cartonQuantity))) : -1;
+        const cartonIndex = job.cartonQuantity > 0 ? Math.floor(i / Math.max(1, job.batch.unitsPerCarton || 1)) : -1;
         const carton = cartonIndex >= 0 ? cartons[Math.min(cartonIndex, cartons.length - 1)] : undefined;
         unitRecords.push({ batchId: job.batchId, publicCode: code, tokenHash: digest(token), level: "UNIT", parentId: carton?.id || null });
         unitAssets.push({ code, level: "UNIT", verifyUrl: baseUrl + "/v/" + token, parentCode: carton?.code || null });
