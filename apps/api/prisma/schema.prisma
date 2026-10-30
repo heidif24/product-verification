@@ -204,6 +204,19 @@ model VerificationEvent {
   @@index([createdAt])
 }
 
+model PrivacyRequest {
+  id          String   @id @default(cuid())
+  email       String
+  requestType String
+  details     String
+  status      String   @default("RECEIVED")
+  adminNote   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([status, createdAt])
+  @@index([email, createdAt])
+}
+
 model AuditLog {
   id         String   @id @default(cuid())
   actor      String
