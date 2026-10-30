@@ -1,17 +1,23 @@
 # PAN Manufacturer Web
 
-Next.js manufacturer portal and dashboard.
+Next.js manufacturer workspace and super-administrator console.
 
-## Live manufacturer console
+## Manufacturer workspace
 
-Run the API and PostgreSQL service as described in [Getting started](../../docs/GETTING-STARTED.md), then start this app:
+Run the API and PostgreSQL service as described in docs/GETTING-STARTED.md, then run:
 
 ```bash
 pnpm --filter @pan/manufacturer-web dev
 ```
 
-Open `http://localhost:3000/portal` to register or sign in. The console supports manufacturer workspace status, product catalogue, production batches, identity issuance, PNG QR pack ZIP export, CSV identity export, live verification metrics and recent scan activity.
+Open http://localhost:3000/portal to register or sign in. The workspace includes company profile, facilities, private documents, team roles, product catalogue, production batches, analytics and Code Studio.
 
-The original dashboard at `/` is a visual design prototype with illustrative demo metrics. It links to the functional portal and must not be mistaken for live company data.
+Code Studio generates distinct carton and individual-unit identities, links units to cartons, and provides a QR PNG ZIP, CSV manifest and print-ready PDF labels. Export manifests contain bearer verification URLs and must be kept confidential.
 
-The browser uses a public API base URL only. Never place the API admin key, JWT signing secret or token HMAC pepper in this app.
+## Super administrator
+
+Open http://localhost:3000/admin. Super-admin credentials are configured on the API and are separate from manufacturer accounts. Company approval, document decisions and identity-state changes are reasoned and audited.
+
+The original dashboard at / is a visual design prototype with illustrative demo metrics. It must not be mistaken for live company data. The functional console is /portal.
+
+Never place API admin keys, JWT signing secrets, token HMAC peppers, export encryption keys, SMTP credentials or S3 credentials in browser code.
