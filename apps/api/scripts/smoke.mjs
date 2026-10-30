@@ -148,3 +148,4 @@ const newLogin = await request("/v1/auth/login", { method: "POST", body: { email
 assert(newLogin.status === 201 && newLogin.data.accessToken, "manufacturer should sign in using the new password");
 
 console.log("PAN end-to-end smoke passed: email verification, password recovery/session revocation, facilities, invitations/RBAC, product/batch, carton-unit issuance, secure export retrieval, verification hierarchy, regulatory disclaimers, quantity guards, analytics, audit and super-admin login.");
+console.log("PAN_MOBILE_SMOKE_CODE=" + units[1].code);
