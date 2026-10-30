@@ -23,15 +23,16 @@
 
 - Manufacturer email verification is required before login; password reset uses single-use, expiring tokens.
 - Super-admin authentication is separate from manufacturer authentication and uses a bcrypt password hash plus a short-lived JWT.
-- Manufacturer membership and role are rechecked against the database for workspace operations; removing a member or changing a role takes effect on subsequent API calls.
+- Manufacturer membership and role are rechecked against the database on every authenticated API request; removing a member or changing a role takes effect on subsequent API calls.
+- Manufacturer and super-admin browser access tokens are currently held in tab-scoped session storage. Before a production launch, prefer an HttpOnly, Secure, SameSite cookie/BFF session design to reduce token exposure to browser scripts.
 - Roles: Owner, Admin, Operator and Analyst. Only Owner/Admin manage company details, facilities, documents and team; Operator can create products/batches and issue identities; Analyst has read access.
-- API throttling, Helmet security headers and strict CORS origins are enabled. Production must also use TLS, managed secrets, WAF/edge rate controls, database backups, monitoring and incident response.
+- API throttling, Helmet security headers and strict CORS origins are enabled. A database-backed readiness endpoint is available for monitoring. Production must also use TLS, managed secrets, WAF/edge rate controls, database backups, monitoring and incident response.
 
 ## Documents and storage
 
 - Company documents are stored in private S3-compatible object storage, not public URLs.
 - Uploads use short-lived presigned PUT URLs; downloads use short-lived signed URLs.
-- Accept only PDF/JPEG/PNG and limit uploads to 10 MB.
+- Accept only PDF/JPEG/PNG and limit uploads to 10 MB. The API checks file signatures; production should add malware scanning/quarantine before documents are made available to reviewers.
 - Production bucket must block public access, enforce encryption at rest, restrict CORS to the manufacturer portal and use least-privilege credentials.
 
 ## Nigerian data protection
