@@ -16,7 +16,7 @@ const registration = await request("/v1/auth/register", {
   method: "POST",
   body: { fullName: "PAN CI Smoke Test", companyName: "PAN Test Manufacturer " + suffix, email: "smoke-" + suffix + "@pan.test", password: "Smoke-test-password-2026!" }
 });
-assert(registration.status >= 200 && registration.status < 300, "manufacturer registration should succeed");
+assert(registration.status >= 200 && registration.status < 300, `manufacturer registration should succeed; HTTP ${registration.status}: ${JSON.stringify(registration.data)}`);
 const token = registration.data.accessToken;
 const workspaceId = registration.data.workspace?.id;
 assert(token && workspaceId, "registration should return an authenticated workspace");
