@@ -7,14 +7,14 @@ import { AuthGuard } from "./auth";
 import { PrismaService } from "./prisma.service";
 import { IssuanceWorker } from "./issuance.worker";
 import { ManufacturerOperationsController, SuperAdminAuthController, SuperAdminController, SuperAdminGuard } from "./operations.controller";
-import { ConsumerReportController } from "./reports.controller";
+import { ConsumerReportController, PrivacyRequestController } from "./reports.controller";
 
 @Module({
   imports: [
     JwtModule.register({ secret: process.env.JWT_SECRET!, signOptions: { expiresIn: "12h" } }),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 120 }])
   ],
-  controllers: [AppController, ManufacturerOperationsController, SuperAdminAuthController, SuperAdminController, ConsumerReportController],
+  controllers: [AppController, ManufacturerOperationsController, SuperAdminAuthController, SuperAdminController, ConsumerReportController, PrivacyRequestController],
   providers: [
     PrismaService, IssuanceWorker, SuperAdminGuard,
     { provide: APP_GUARD, useClass: AuthGuard },
