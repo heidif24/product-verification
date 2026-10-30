@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards, BadRequestException, NotFoundException, ConflictException } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Req, UseGuards, BadRequestException, NotFoundException, ConflictException, ForbiddenException } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import * as bcrypt from "bcryptjs";
 import * as QRCode from "qrcode";
 import { PrismaService } from "./prisma.service";
@@ -51,6 +51,17 @@ export class AppController {
   private session(user: { id: string; fullName: string; email: string }, manufacturerId: string, role: string) {
     const accessToken = this.jwt.sign({ sub: user.id, manufacturerId, role });
     return { accessToken, user: { id: user.id, fullName: user.fullName, email: user.email }, workspace: { id: manufacturerId, role } };
+  }
+
+  @Post("v1/admin/manufacturers/:id/approve")
+  @Public()
+  async approveManufacturer(@Req() req: AuthRequest, @Param("id") id: string) {
+    const provided = req.headers["x-pan-admin-key"];
+    const expected = process.env.ADMIN_API_KEY || "";
+    if (typeof provided !== "string" || !expected || provided.length !== expected.length || !timingSafeEqual(Buffer.from(provided), Buffer.from(expected))) {
+      throw new ForbiddenException("Administrator credentials are invalid.");
+    }
+    return this.db.manufacturer.update({ where: { id }, data: { status: "APPROVED" }, select: { id: true, legalName: true, status: true, updatedAt: true } });
   }
 
   @Get("v1/manufacturer/me")
@@ -112,7 +123,7 @@ export class AppController {
     const baseUrl = (process.env.PUBLIC_VERIFY_URL || "http://localhost:3001").replace(/\/$/, "");
     const records = Array.from({ length: quantity }, () => {
       const token = randomBytes(32).toString("base64url");
-      const publicCode = "PAN-" + randomBytes(5).toString("hex").toUpperCase();
+      const publicCode = "PAN-" + randomBytes(10).toString("hex").toUpperCase();
       return { token, publicCode, tokenHash: tokenDigest(token) };
     });
     const created = await this.db.$transaction(async tx => {
@@ -132,13 +143,13 @@ export class AppController {
     const identity = await this.db.productIdentity.findUnique({ where: { publicCode: code.trim().toUpperCase() }, include: { batch: { include: { product: { include: { manufacturer: true } } } } } });
     if (!identity) throw new NotFoundException("This product ID is not recognised.");
     const now = new Date();
-    const outcome = identity.status === "REVOKED" ? "REVOKED" : identity.status === "QUARANTINED" ? "UNDER_REVIEW" : identity.verificationCount > 0 ? "PREVIOUSLY_SCANNED" : "VERIFIED";
+    const outcome = identity.status === "REVOKED" ? "REVOKED" : identity.status === "QUARANTINED" ? "UNDER_REVIEW" : identity.batch.product.manufacturer.status !== "APPROVED" ? "MANUFACTURER_PENDING" : identity.verificationCount > 0 ? "PREVIOUSLY_SCANNED" : "VERIFIED";
     await this.db.$transaction([
       this.db.productIdentity.update({ where: { id: identity.id }, data: { verificationCount: { increment: 1 }, firstVerifiedAt: identity.firstVerifiedAt ?? now, lastVerifiedAt: now } }),
       this.db.verificationEvent.create({ data: { identityId: identity.id, outcome: "MANUAL_" + outcome } })
     ]);
     const { product, batch } = identity.batch;
-    return { status: outcome, title: outcome === "VERIFIED" ? "Product identity verified" : outcome === "PREVIOUSLY_SCANNED" ? "This identity has been scanned before" : outcome === "UNDER_REVIEW" ? "Product under review" : "Identity revoked", message: outcome === "VERIFIED" ? "This code matches an active identity in the PAN network. No known issue has been recorded for this identity." : outcome === "PREVIOUSLY_SCANNED" ? "This code has been checked before. This is not proof of counterfeiting; compare the product details and contact the manufacturer if anything looks unusual." : outcome === "UNDER_REVIEW" ? "This identity is temporarily under review. Contact the manufacturer before relying on this product." : "This identity is no longer active in the PAN network.", product: { name: product.name, brand: product.brand, category: product.category, manufacturer: product.manufacturer.legalName, batchCode: batch.batchCode, productionDate: batch.productionDate, expiryDate: batch.expiryDate }, checkedAt: now.toISOString(), scansRecorded: identity.verificationCount + 1 };
+    return { status: outcome, title: outcome === "VERIFIED" ? "Product identity verified" : outcome === "PREVIOUSLY_SCANNED" ? "This identity has been scanned before" : outcome === "UNDER_REVIEW" ? "Product under review" : outcome === "MANUFACTURER_PENDING" ? "Manufacturer review pending" : "Identity revoked", message: outcome === "VERIFIED" ? "This code matches an active identity in the PAN network. No known issue has been recorded for this identity." : outcome === "PREVIOUSLY_SCANNED" ? "This code has been checked before. This is not proof of counterfeiting; compare the product details and contact the manufacturer if anything looks unusual." : outcome === "UNDER_REVIEW" ? "This identity is temporarily under review. Contact the manufacturer before relying on this product." : outcome === "MANUFACTURER_PENDING" ? "This code matches an identity record, but the manufacturer has not yet completed PAN approval. This is not a PAN endorsement of the product." : "This identity is no longer active in the PAN network.", product: { name: product.name, brand: product.brand, category: product.category, manufacturer: product.manufacturer.legalName, batchCode: batch.batchCode, productionDate: batch.productionDate, expiryDate: batch.expiryDate }, checkedAt: now.toISOString(), scansRecorded: identity.verificationCount + 1 };
   }
 
   @Get("v1/verify/:token")
