@@ -28,6 +28,8 @@
 - Carton/unit relationship where available.
 - Regulatory identifiers are displayed only as producer-supplied, not verified by PAN.
 - A product check works without consumer account creation or precise GPS location.
+- Consumers can report product/packaging concerns from the public result page or mobile app; super-admins triage reports with an audit trail.
+- Batch expiry dates are surfaced as a distinct expired status, not a counterfeit determination.
 
 ## Public verification website
 
