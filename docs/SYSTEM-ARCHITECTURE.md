@@ -52,7 +52,7 @@ Statuses distinguish active identity, previously scanned, producer pending, unde
 
 ## Privacy and operational boundaries
 
-Public verification does not require a consumer account or precise location. The platform records the identity result and time, not continuous consumer location. A public privacy request form and super-admin request queue support access, correction, deletion, restriction and objection requests; identity verification is required before disclosure or action.
+Public verification does not require a consumer account or precise location. The platform records the identity result and time, not continuous consumer location. Public consumer concern reports feed a super-admin review queue. A public privacy request form and super-admin request queue support access, correction, deletion, restriction and objection requests; identity verification is required before disclosure or action.
 
 The current privacy and terms pages are drafts. Before production, PAN must complete Nigerian data-protection/legal review, determine NDPA/NDPC registration and audit obligations, document retention and lawful bases, assess cross-border hosting and complete a DPIA where required.
 
