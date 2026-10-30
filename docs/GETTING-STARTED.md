@@ -22,7 +22,7 @@ PAN_ADMIN_PASSWORD='use-a-unique-long-password' node -e "require('bcryptjs').has
 
 Put the resulting hash in SUPER_ADMIN_PASSWORD_HASH and configure SUPER_ADMIN_EMAIL. Do not use the same password for a manufacturer account.
 
-Configure SMTP for verification, password recovery and invitations. Configure a private S3 bucket or compatible storage service for documents; enable bucket encryption, block public access, and configure CORS to permit PUT from the manufacturer portal origin only. Do not make the document bucket public.
+Configure SMTP for verification, password recovery, invitations and privacy-request confirmations. Set PRIVACY_CONTACT_EMAIL to a monitored mailbox before production. Configure SMTP for verification, password recovery and invitations. Configure a private S3 bucket or compatible storage service for documents; enable bucket encryption, block public access, and configure CORS to permit PUT from the manufacturer portal origin only. Do not make the document bucket public.
 
 Run:
 - pnpm install
@@ -52,7 +52,7 @@ Run pnpm --filter @pan/consumer-mobile start.
 
 ## Super administrator console
 
-Open http://localhost:3000/admin and sign in with SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD_HASH. The short-lived super-admin JWT is held in session storage, not local storage. Company status changes, document decisions and identity actions require a reason and are written to the audit trail.
+Open http://localhost:3000/admin and sign in with SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD_HASH. The short-lived super-admin JWT is held in session storage, not local storage. Company status changes, document decisions, privacy-request decisions and identity actions require a reason and are written to the audit trail. The public privacy page accepts data-subject requests; verify each requester before disclosing or changing any personal information.
 
 PAN approval means PAN has completed its own producer onboarding review. It is not NAFDAC registration, SON certification, product testing or government endorsement.
 
