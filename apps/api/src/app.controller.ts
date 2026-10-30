@@ -102,7 +102,7 @@ export class AppController {
     const batchCode = body.batchCode?.trim();
     if (!batchCode) throw new BadRequestException("Batch reference is required.");
     const quantity = Number(body.quantity ?? 0);
-    if (!Number.isInteger(quantity) || quantity < 0 || quantity > 10000000) throw new BadRequestException("Enter a valid production quantity.");
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10000000) throw new BadRequestException("Production quantity must be a whole number greater than zero.");
     try {
       return await this.db.batch.create({ data: { productId: id, batchCode, quantity, productionDate: body.productionDate ? new Date(body.productionDate) : null, expiryDate: body.expiryDate ? new Date(body.expiryDate) : null } });
     } catch (error: any) {
