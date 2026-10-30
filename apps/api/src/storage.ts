@@ -19,7 +19,7 @@ function config() {
 }
 export async function createPrivateUploadUrl(key: string, mimeType: string, sizeBytes: number) {
   const { client, bucket } = config();
-  const command = new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: mimeType, Metadata: { "expected-size": String(sizeBytes) }, ServerSideEncryption: "AES256" });
+  const command = new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: mimeType, ContentLength: sizeBytes, Metadata: { "expected-size": String(sizeBytes) }, ServerSideEncryption: "AES256" });
   return getSignedUrl(client, command, { expiresIn: 600 });
 }
 export async function confirmPrivateUpload(key: string, expectedSize: number, expectedMime: string) {
