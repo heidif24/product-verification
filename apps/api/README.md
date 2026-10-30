@@ -17,7 +17,10 @@ The API listens on port 4000; routes are prefixed with `/api`. Health: `GET /api
 
 - `POST /api/v1/auth/register` — creates a user and pending manufacturer workspace.
 - `POST /api/v1/auth/login` — issues a 12-hour bearer token.
-- `POST /api/v1/admin/manufacturers/:id/approve` — internal operator approval; requires `x-pan-admin-key`.
+- `GET /api/v1/admin/manufacturers?status=PENDING` — list workspaces for internal review; requires `x-pan-admin-key`.
+- `POST /api/v1/admin/manufacturers/:id/approve` — approve with a recorded reason; requires `x-pan-admin-key`.
+- `POST /api/v1/admin/identities/:id/quarantine|release|revoke` — change identity state with an audit reason; requires `x-pan-admin-key`.
+- `GET /api/v1/admin/audit` — latest 100 administrator actions; requires `x-pan-admin-key`.
 - `GET /api/v1/manufacturer/me` — authenticated workspace profile.
 - `GET|POST /api/v1/products` — list/create products in the caller's workspace.
 - `GET|POST /api/v1/products/:id/batches` — list/create product batches.
@@ -33,6 +36,6 @@ A new manufacturer starts in `PENDING`. An identity issued by a pending manufact
 
 ## Current MVP boundaries
 
-This is a functional first vertical slice, not a production compliance certification. It includes registration, login, tenant-scoped products and batches, QR issuance, CSV/QR asset output in the manufacturer portal, and public web verification. Quarantine/revocation are represented in the data model but do not yet have an operator workflow.
+This is a functional first vertical slice, not a production compliance certification. It includes registration, login, tenant-scoped products and batches, QR issuance, CSV/QR asset output in the manufacturer portal, and public web verification. Identity quarantine, release and revocation now have an internal API workflow with recorded reasons and audit entries. A full administrator interface and separate admin identity provider remain outstanding.
 
 Before public launch add email verification and recovery, proper administrator accounts and approval UI, rate limiting/WAF, durable async bulk issuance, idempotency keys, append-only audit controls, observability, backup/restore drills, threat modelling, Nigerian NDPA review, and production hosting/secrets. Redis is provisioned for the async job stage; this first vertical slice issues up to 250 identities synchronously.
