@@ -9,10 +9,10 @@ import {
 } from "lucide-react";
 
 const activities = [
-  { name: "Golden Morn 500g", batch: "GM-2409-A", code: "PAN-8K2F-91", state: "Verified", time: "2 min ago", tone: "green" },
-  { name: "Peak Milk  sachet", batch: "PM-2410-C", code: "PAN-4J7Q-22", state: "Verified", time: "18 min ago", tone: "green" },
-  { name: "Choco Delight 80g", batch: "CD-2410-B", code: "PAN-9M3R-08", state: "Review flagged", time: "31 min ago", tone: "amber" },
-  { name: "PureLife Water 75cl", batch: "PL-2410-F", code: "PAN-2T6W-54", state: "Verified", time: "46 min ago", tone: "green" },
+  { name: "Sunfield Cereal 500g", batch: "GM-2409-A", code: "PAN-8K2F-91", state: "Verified", time: "2 min ago", tone: "green" },
+  { name: "Northstar Milk sachet", batch: "PM-2410-C", code: "PAN-4J7Q-22", state: "Verified", time: "18 min ago", tone: "green" },
+  { name: "Cocoa House 80g", batch: "CD-2410-B", code: "PAN-9M3R-08", state: "Review flagged", time: "31 min ago", tone: "amber" },
+  { name: "ClearSpring Water 75cl", batch: "PL-2410-F", code: "PAN-2T6W-54", state: "Verified", time: "46 min ago", tone: "green" },
 ];
 
 const bars = [34, 48, 42, 62, 51, 76, 57, 69, 54, 82, 65, 92, 71, 86, 63, 78, 95, 73, 88, 68, 98, 82, 91, 76, 100, 84, 93, 72];
@@ -65,7 +65,7 @@ export default function Dashboard() {
 
         <div className="content">
           <div className="welcome-row">
-            <div><div className="eyebrow"><span className="live-pulse"/> THURSDAY, 30 OCTOBER 2026</div><h1>Good afternoon, Felix <span className="wave">✳</span></h1><p className="subheading">Here’s what’s happening across your product network.</p></div>
+            <div><div className="eyebrow"><span className="live-pulse"/> FRIDAY, 30 OCTOBER 2026 · DEMO DATA</div><h1>Good afternoon, Felix <span className="wave">✳</span></h1><p className="subheading">Here’s what’s happening across your product network.</p></div>
             <div className="welcome-actions"><button className="button button-light" onClick={() => setActive("Reports")}><Download size={16}/> Export report</button><button className="button button-primary" onClick={() => setActive("Identity issuance")}><Plus size={17}/> Issue product IDs</button></div>
           </div>
 
