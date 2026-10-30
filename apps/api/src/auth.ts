@@ -17,7 +17,7 @@ export class AuthGuard implements CanActivate {
     if (!header?.startsWith("Bearer ")) throw new UnauthorizedException("Sign in to continue");
     try {
       req.user = await this.jwt.verifyAsync(header.slice(7));
-      return Boolean(req.user.sub && req.user.manufacturerId);
+      return Boolean(req.user.sub && (req.user.manufacturerId || req.user.role === "SUPER_ADMIN"));
     } catch { throw new UnauthorizedException("Your session has expired. Please sign in again."); }
   }
 }
