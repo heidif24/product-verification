@@ -73,7 +73,7 @@ export class SuperAdminController {
       _count: { select: { products: true, memberships: true, facilities: true, documents: true } }
     } });
     if (!company) throw new NotFoundException("Company workspace not found.");
-    return company;
+    return { ...company, documents: await Promise.all(company.documents.map(async d => ({ ...d, downloadUrl: await createPrivateDownloadUrl(d.storageKey) }))) };
   }
   @Post("companies/:id/status")
   async companyStatus(@Param("id") id: string, @Body() body: { status?: string; reason?: string }) {
@@ -243,11 +243,16 @@ export class ManufacturerOperationsController {
     const unitQuantity = Number(body.unitQuantity || 0), cartonQuantity = Number(body.cartonQuantity || 0);
     if (!Number.isInteger(unitQuantity) || !Number.isInteger(cartonQuantity) || unitQuantity < 0 || cartonQuantity < 0 || unitQuantity + cartonQuantity < 1 || unitQuantity > 10000 || cartonQuantity > 1000) throw new BadRequestException("Request up to 10,000 individual-unit codes and 1,000 carton codes per job.");
     if (cartonQuantity > 0 && (!batch.unitsPerCarton || unitQuantity !== cartonQuantity * batch.unitsPerCarton)) throw new BadRequestException("Carton issuance must include exactly the configured number of unit identities per carton. Issue loose units separately.");
-    const currentUnits = await this.db.productIdentity.count({ where: { batchId: id, level: "UNIT" } });
-    const currentCartons = await this.db.productIdentity.count({ where: { batchId: id, level: "CARTON" } });
-    if (currentUnits + unitQuantity > batch.quantity) throw new BadRequestException("The requested unit identities exceed the production quantity remaining.");
-    if (batch.cartonCount !== null && currentCartons + cartonQuantity > batch.cartonCount) throw new BadRequestException("The requested carton identities exceed the number of cartons recorded for this batch.");
-    return this.db.issuanceJob.create({ data: { manufacturerId: req.user.manufacturerId, batchId: id, createdById: req.user.sub, unitQuantity, cartonQuantity } });
+    return this.db.$transaction(async tx => {
+      const [currentUnits, currentCartons, pending] = await Promise.all([
+        tx.productIdentity.count({ where: { batchId: id, level: "UNIT" } }),
+        tx.productIdentity.count({ where: { batchId: id, level: "CARTON" } }),
+        tx.issuanceJob.aggregate({ where: { batchId: id, status: { in: ["QUEUED", "PROCESSING"] } }, _sum: { unitQuantity: true, cartonQuantity: true } })
+      ]);
+      if (currentUnits + (pending._sum.unitQuantity || 0) + unitQuantity > batch.quantity) throw new BadRequestException("The requested unit identities exceed the production quantity remaining, including queued jobs.");
+      if (cartonQuantity > 0 && (batch.cartonCount === null || currentCartons + (pending._sum.cartonQuantity || 0) + cartonQuantity > batch.cartonCount)) throw new BadRequestException("The requested carton identities exceed the number of cartons recorded for this batch.");
+      return tx.issuanceJob.create({ data: { manufacturerId: req.user.manufacturerId, batchId: id, createdById: req.user.sub, unitQuantity, cartonQuantity } });
+    }, { isolationLevel: "Serializable" });
   }
   @Get("issuance-jobs/:id")
   async issuanceJob(@Req() req: AuthRequest, @Param("id") id: string) {
