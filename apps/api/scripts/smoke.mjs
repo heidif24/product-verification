@@ -3,6 +3,16 @@ const adminKey = process.env.ADMIN_API_KEY;
 const assert = (condition, message) => { if (!condition) throw new Error("PAN smoke test failed: " + message); };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+async function waitForJob(jobId, token) {
+  for (let i = 0; i < 60; i++) {
+    await sleep(1000);
+    const poll = await request("/v1/manufacturer/issuance-jobs/" + jobId, { token });
+    if (poll.status !== 200) throw new Error("PAN smoke test failed: issuance job polling returned " + poll.status);
+    if (poll.data.status === "COMPLETED" || poll.data.status === "FAILED") return poll.data;
+  }
+  return null;
+}
+
 async function request(path, { method = "GET", body, token, admin = false } = {}) {
   const headers = { "Content-Type": "application/json" };
   if (token) headers.Authorization = "Bearer " + token;
@@ -61,13 +71,7 @@ assert(approval.status === 201 && approval.data.status === "APPROVED", "internal
 
 const job = await request("/v1/manufacturer/batches/" + batch.data.id + "/issuance-jobs", { method: "POST", token, body: { unitQuantity: 2, cartonQuantity: 1 } });
 assert(job.status === 201 && job.data.status === "QUEUED", "producer should queue separate carton and unit identities");
-let result = null;
-for (let i = 0; i < 60; i++) {
-  await sleep(1000);
-  const poll = await request("/v1/manufacturer/issuance-jobs/" + job.data.id, { token });
-  if (poll.status !== 200) throw new Error("PAN smoke test failed: issuance job polling returned " + poll.status);
-  if (poll.data.status === "COMPLETED" || poll.data.status === "FAILED") { result = poll.data; break; }
-}
+const result = await waitForJob(job.data.id, token);
 assert(result && result.status === "COMPLETED" && result.assets.length === 3, "background worker should complete carton and individual unit issuance");
 const carton = result.assets.find(x => x.level === "CARTON");
 const units = result.assets.filter(x => x.level === "UNIT");
@@ -85,10 +89,25 @@ assert(repeat.data.status === "PREVIOUSLY_SCANNED", "repeat scan should be disti
 const manual = await request("/v1/verify/code/" + units[1].code);
 assert(manual.status === 200 && manual.data.product.packaging.cartonCode === carton.code, "manual unit lookup should preserve carton relationship");
 
+const looseBatch = await request("/v1/products/" + product.data.id + "/batches", { method: "POST", token, body: { batchCode: "LOOSE-" + suffix, quantity: 2, cartonCount: 1, unitsPerCarton: 2 } });
+assert(looseBatch.status === 201, "producer should create a second carton-configured batch");
+const looseJob = await request("/v1/manufacturer/batches/" + looseBatch.data.id + "/issuance-jobs", { method: "POST", token, body: { unitQuantity: 2, cartonQuantity: 0 } });
+const looseResult = await waitForJob(looseJob.data.id, token);
+assert(looseResult?.status === "COMPLETED" && looseResult.assets.length === 2, "unit-only identities should issue before carton labels");
+const cartonOnlyJob = await request("/v1/manufacturer/batches/" + looseBatch.data.id + "/issuance-jobs", { method: "POST", token, body: { unitQuantity: 0, cartonQuantity: 1 } });
+assert(cartonOnlyJob.status === 201, "carton-only job should accept existing unassigned unit identities");
+const cartonOnlyResult = await waitForJob(cartonOnlyJob.data.id, token);
+assert(cartonOnlyResult?.status === "COMPLETED" && cartonOnlyResult.assets.length === 1 && cartonOnlyResult.assets[0].level === "CARTON", "carton-only issuance should link existing individual identities");
+const linkedCartonToken = new URL(cartonOnlyResult.assets[0].verifyUrl).pathname.split("/").filter(Boolean).pop();
+const linkedCartonCheck = await request("/v1/verify/" + linkedCartonToken);
+assert(linkedCartonCheck.data.product.packaging.containedUnitCount === 2, "carton-only job should link previously issued units");
+
+
+
 const overIssue = await request("/v1/manufacturer/batches/" + batch.data.id + "/issuance-jobs", { method: "POST", token, body: { unitQuantity: 1, cartonQuantity: 0 } });
 assert(overIssue.status === 400, "queued issuance must not exceed production quantity");
 const analytics = await request("/v1/analytics/overview", { token });
-assert(analytics.data.products === 1 && analytics.data.batches === 1 && analytics.data.identities === 3 && analytics.data.scans >= 4, "manufacturer analytics should reflect unit and carton identities");
+assert(analytics.data.products === 1 && analytics.data.batches === 2 && analytics.data.identities === 6 && analytics.data.scans >= 5, "manufacturer analytics should reflect unit and carton identities");
 const audit = await request("/v1/admin/audit", { admin: true });
 assert(audit.status === 200 && audit.data.some(x => x.action === "MANUFACTURER_APPROVED" && x.targetId === workspaceId), "producer approval should be auditable");
 
@@ -96,6 +115,12 @@ const adminLogin = await request("/v1/super-admin/auth/login", { method: "POST",
 assert(adminLogin.status === 201 && adminLogin.data.accessToken, "separate super administrator login should succeed");
 const adminOverview = await request("/v1/super-admin/overview", { token: adminLogin.data.accessToken });
 assert(adminOverview.status === 200 && adminOverview.data.companies >= 1, "super administrator should access the network overview");
+const privacyRequest = await request("/v1/privacy/requests", { method: "POST", body: { email: "privacy-" + suffix + "@pan.test", requestType: "ACCESS", details: "Please provide information associated with my PAN account." } });
+assert(privacyRequest.status === 201 && privacyRequest.data.reference, "public privacy rights request should be recorded");
+const privacyQueue = await request("/v1/super-admin/privacy-requests", { token: adminLogin.data.accessToken });
+assert(privacyQueue.status === 200 && privacyQueue.data.some(x => x.id === privacyRequest.data.reference), "super admin should review privacy requests");
+const privacyUpdate = await request("/v1/super-admin/privacy-requests/" + privacyRequest.data.reference + "/status", { method: "POST", token: adminLogin.data.accessToken, body: { status: "IN_REVIEW", note: "Identity verification pending." } });
+assert(privacyUpdate.status === 201 && privacyUpdate.data.status === "IN_REVIEW", "privacy request review should be audited");
 
 const forgot = await request("/v1/auth/forgot-password", { method: "POST", body: { email } });
 assert(forgot.status === 201 && forgot.data.testResetToken, "password recovery should issue a test-only reset token");
