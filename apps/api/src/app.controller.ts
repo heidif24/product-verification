@@ -126,14 +126,17 @@ export class AppController {
       const publicCode = "PAN-" + randomBytes(10).toString("hex").toUpperCase();
       return { token, publicCode, tokenHash: tokenDigest(token) };
     });
-    const created = await this.db.$transaction(async tx => {
-      const identities = await tx.productIdentity.createMany({ data: records.map(r => ({ batchId: id, publicCode: r.publicCode, tokenHash: r.tokenHash })) });
-      return identities;
-    });
     const assets = await Promise.all(records.map(async r => {
       const verifyUrl = baseUrl + "/v/" + r.token;
       return { code: r.publicCode, verifyUrl, qrDataUrl: await QRCode.toDataURL(verifyUrl, { errorCorrectionLevel: "H", margin: 2, width: 320, color: { dark: "#173B32", light: "#FFFFFF" } }) };
     }));
+    const created = await this.db.$transaction(async tx => {
+      const alreadyIssued = await tx.productIdentity.count({ where: { batchId: id } });
+      if (alreadyIssued + quantity > batch.quantity) {
+        throw new BadRequestException(`This batch contains ${batch.quantity} units; ${alreadyIssued} identities have already been issued.`);
+      }
+      return tx.productIdentity.createMany({ data: records.map(r => ({ batchId: id, publicCode: r.publicCode, tokenHash: r.tokenHash })) });
+    }, { isolationLevel: "Serializable" });
     return { issued: created.count, batch: { id: batch.id, batchCode: batch.batchCode }, product: { name: batch.product.name, brand: batch.product.brand }, identities: assets, notice: "Each QR identity is unique. Keep this export secure: verification URLs contain bearer tokens." };
   }
 
@@ -143,9 +146,9 @@ export class AppController {
     const identity = await this.db.productIdentity.findUnique({ where: { publicCode: code.trim().toUpperCase() }, include: { batch: { include: { product: { include: { manufacturer: true } } } } } });
     if (!identity) throw new NotFoundException("This product ID is not recognised.");
     const now = new Date();
-    const outcome = identity.status === "REVOKED" ? "REVOKED" : identity.status === "QUARANTINED" ? "UNDER_REVIEW" : identity.batch.product.manufacturer.status !== "APPROVED" ? "MANUFACTURER_PENDING" : identity.verificationCount > 0 ? "PREVIOUSLY_SCANNED" : "VERIFIED";
+    const outcome = identity.status === "REVOKED" ? "REVOKED" : identity.status === "QUARANTINED" ? "UNDER_REVIEW" : identity.batch.product.manufacturer.status !== "APPROVED" ? "MANUFACTURER_PENDING" : identity.firstVerifiedAt !== null ? "PREVIOUSLY_SCANNED" : "VERIFIED";
     await this.db.$transaction([
-      this.db.productIdentity.update({ where: { id: identity.id }, data: { verificationCount: { increment: 1 }, firstVerifiedAt: identity.firstVerifiedAt ?? now, lastVerifiedAt: now } }),
+      this.db.productIdentity.update({ where: { id: identity.id }, data: { verificationCount: { increment: 1 }, firstVerifiedAt: outcome === "VERIFIED" ? now : identity.firstVerifiedAt, lastVerifiedAt: now } }),
       this.db.verificationEvent.create({ data: { identityId: identity.id, outcome: "MANUAL_" + outcome } })
     ]);
     const { product, batch } = identity.batch;
@@ -162,9 +165,9 @@ export class AppController {
       return { status: "NOT_RECOGNISED", title: "Identity not recognised", message: "We could not find this code in the PAN network. Check that you scanned the code on the product itself." };
     }
     const now = new Date();
-    const outcome = identity.status === "REVOKED" ? "REVOKED" : identity.status === "QUARANTINED" ? "UNDER_REVIEW" : identity.batch.product.manufacturer.status !== "APPROVED" ? "MANUFACTURER_PENDING" : identity.verificationCount > 0 ? "PREVIOUSLY_SCANNED" : "VERIFIED";
+    const outcome = identity.status === "REVOKED" ? "REVOKED" : identity.status === "QUARANTINED" ? "UNDER_REVIEW" : identity.batch.product.manufacturer.status !== "APPROVED" ? "MANUFACTURER_PENDING" : identity.firstVerifiedAt !== null ? "PREVIOUSLY_SCANNED" : "VERIFIED";
     await this.db.$transaction([
-      this.db.productIdentity.update({ where: { id: identity.id }, data: { verificationCount: { increment: 1 }, firstVerifiedAt: identity.firstVerifiedAt ?? now, lastVerifiedAt: now } }),
+      this.db.productIdentity.update({ where: { id: identity.id }, data: { verificationCount: { increment: 1 }, firstVerifiedAt: outcome === "VERIFIED" ? now : identity.firstVerifiedAt, lastVerifiedAt: now } }),
       this.db.verificationEvent.create({ data: { identityId: identity.id, outcome } })
     ]);
     const { product, batch } = identity.batch;
