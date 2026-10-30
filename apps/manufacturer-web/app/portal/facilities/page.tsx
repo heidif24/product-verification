@@ -1,4 +1,5 @@
 "use client";
+import "../ops.css";
 import { useEffect, useState, type FormEvent } from "react";
 const API=process.env.NEXT_PUBLIC_PAN_API_URL||"http://localhost:4000/api";
 async function api(path:string,token:string,init:RequestInit={}){const r=await fetch(API+path,{...init,headers:{"Content-Type":"application/json",Authorization:"Bearer "+token,...(init.headers||{})}});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.message||"Request failed");return d;}
