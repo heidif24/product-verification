@@ -49,6 +49,8 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
       if (cartons.length) {
         cartons.forEach(c => assets.push({ code: c.code, level: "CARTON", verifyUrl: baseUrl + "/v/" + c.token, parentCode: null }));
       }
+      const existingUnitsToLink = job.cartonQuantity > 0 && job.unitQuantity === 0 ? await this.db.productIdentity.findMany({ where: { batchId: job.batchId, level: "UNIT", parentId: null }, select: { id: true }, orderBy: { issuedAt: "asc" }, take: job.cartonQuantity * (job.batch.unitsPerCarton || 0) }) : [];
+      if (job.cartonQuantity > 0 && job.unitQuantity === 0 && existingUnitsToLink.length !== job.cartonQuantity * (job.batch.unitsPerCarton || 0)) throw new Error("Not enough unassigned unit identities remain for carton linking.");
       const unitRecords: Array<{ batchId: string; publicCode: string; tokenHash: string; level: "UNIT"; parentId: string | null }> = [];
       const unitAssets: ExportAsset[] = [];
       for (let i = 0; i < job.unitQuantity; i++) {
@@ -65,6 +67,14 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
       await this.db.$transaction(async tx => {
         if (cartons.length) await tx.productIdentity.createMany({ data: cartons.map(c => ({ id: c.id, batchId: job.batchId, publicCode: c.code, tokenHash: digest(c.token), level: "CARTON" })) });
         for (let offset = 0; offset < unitRecords.length; offset += 1000) await tx.productIdentity.createMany({ data: unitRecords.slice(offset, offset + 1000) });
+        if (existingUnitsToLink.length) {
+          const perCarton = job.batch.unitsPerCarton || 0;
+          for (let index = 0; index < cartons.length; index++) {
+            const ids = existingUnitsToLink.slice(index * perCarton, (index + 1) * perCarton).map(x => x.id);
+            const linked = await tx.productIdentity.updateMany({ where: { id: { in: ids }, parentId: null }, data: { parentId: cartons[index].id } });
+            if (linked.count !== ids.length) throw new Error("Some unit identities were already assigned to another carton.");
+          }
+        }
         await tx.issuanceJob.update({ where: { id: jobId }, data: { status: "COMPLETED", progress: 100, resultCiphertext: ciphertext, expiresAt } });
       }, { timeout: 120000 });
     } catch (error) {
