@@ -12,7 +12,7 @@ async function bootstrap() {
     if (!valid) throw new Error(`${key} must be configured with a secure independent secret.`);
   }
   if (process.env.NODE_ENV === "production") {
-    for (const key of ["SMTP_HOST", "SUPER_ADMIN_EMAIL", "SUPER_ADMIN_PASSWORD_HASH", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"] as const) {
+    for (const key of ["SMTP_HOST", "SUPER_ADMIN_EMAIL", "SUPER_ADMIN_PASSWORD_HASH", "PRIVACY_CONTACT_EMAIL", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"] as const) {
       if (!process.env[key]) throw new Error(`${key} is required in production.`);
     }
   }
