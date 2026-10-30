@@ -9,7 +9,7 @@ NestJS + Prisma + PostgreSQL API for manufacturer onboarding, product catalogues
 3. Run `pnpm install` from the repository root.
 4. Run `pnpm --filter @pan/api db:generate`.
 5. Run `pnpm --filter @pan/api db:deploy` (or `db:migrate -- --name init` for local migration development).
-6. Run `pnpm --filter @pan/api dev`.
+6. Run `pnpm --filter @pan/api dev`.\n7. In another terminal run `pnpm --filter @pan/api smoke` to exercise the registration-to-verification journey.
 
 The API listens on port 4000; routes are prefixed with `/api`. Health: `GET /api/health`.
 
@@ -36,6 +36,6 @@ A new manufacturer starts in `PENDING`. An identity issued by a pending manufact
 
 ## Current MVP boundaries
 
-This is a functional first vertical slice, not a production compliance certification. It includes registration, login, tenant-scoped products and batches, QR issuance, CSV/QR asset output in the manufacturer portal, and public web verification. Identity quarantine, release and revocation now have an internal API workflow with recorded reasons and audit entries. A full administrator interface and separate admin identity provider remain outstanding.
+The automated smoke test exercises registration, login, product and batch creation, identity issuance, pending/approved verification, repeat scans, manual lookup, issuance quantity limits, analytics and audit records. This is a functional first vertical slice, not a production compliance certification. It includes registration, login, tenant-scoped products and batches, QR issuance, CSV/QR asset output in the manufacturer portal, and public web verification. Identity quarantine, release and revocation now have an internal API workflow with recorded reasons and audit entries. A full administrator interface and separate admin identity provider remain outstanding.
 
 Before public launch add email verification and recovery, proper administrator accounts and approval UI, rate limiting/WAF, durable async bulk issuance, idempotency keys, append-only audit controls, observability, backup/restore drills, threat modelling, Nigerian NDPA review, and production hosting/secrets. Redis is provisioned for the async job stage; this first vertical slice issues up to 250 identities synchronously.
