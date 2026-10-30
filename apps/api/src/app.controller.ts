@@ -103,7 +103,7 @@ export class AppController {
     if (!token || token.purpose !== "PASSWORD_RESET" || token.usedAt || token.expiresAt < new Date()) throw new BadRequestException("This password reset link is invalid or has expired.");
     const passwordHash = await bcrypt.hash(body.password, 12);
     await this.db.$transaction([
-      this.db.user.update({ where: { id: token.userId }, data: { passwordHash } }),
+      this.db.user.update({ where: { id: token.userId }, data: { passwordHash, tokenVersion: { increment: 1 } } }),
       this.db.verificationToken.updateMany({ where: { userId: token.userId, purpose: "PASSWORD_RESET", usedAt: null }, data: { usedAt: new Date() } })
     ]);
     return { reset: true, message: "Your password has been changed. Sign in with your new password." };
@@ -122,8 +122,8 @@ export class AppController {
     return this.session(user, membership.manufacturerId, membership.role);
   }
 
-  private session(user: { id: string; fullName: string; email: string }, manufacturerId: string, role: string) {
-    const accessToken = this.jwt.sign({ sub: user.id, manufacturerId, role });
+  private session(user: { id: string; fullName: string; email: string; tokenVersion: number }, manufacturerId: string, role: string) {
+    const accessToken = this.jwt.sign({ sub: user.id, manufacturerId, role, tokenVersion: user.tokenVersion });
     return { accessToken, user: { id: user.id, fullName: user.fullName, email: user.email }, workspace: { id: manufacturerId, role } };
   }
 
