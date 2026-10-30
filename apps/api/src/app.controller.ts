@@ -183,6 +183,7 @@ export class AppController {
   @Get("v1/manufacturer/me")
   @UseGuards(AuthGuard)
   async me(@Req() req: AuthRequest) {
+    await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR", "ANALYST"]);
     const manufacturer = await this.db.manufacturer.findUnique({ where: { id: req.user.manufacturerId }, include: { _count: { select: { products: true, memberships: true } } } });
     if (!manufacturer) throw new NotFoundException("Workspace not found");
     return { ...manufacturer, counts: manufacturer._count };
@@ -190,6 +191,7 @@ export class AppController {
 
   @Get("v1/analytics/overview")
   async analytics(@Req() req: AuthRequest) {
+    await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR", "ANALYST"]);
     const manufacturerId = req.user.manufacturerId;
     const identityWhere = { batch: { product: { manufacturerId } } };
     const [products, batches, identities, scans, recent] = await Promise.all([
@@ -205,6 +207,7 @@ export class AppController {
   @Get("v1/products")
   @UseGuards(AuthGuard)
   async products(@Req() req: AuthRequest) {
+    await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR", "ANALYST"]);
     return this.db.product.findMany({ where: { manufacturerId: req.user.manufacturerId }, include: { _count: { select: { batches: true } }, batches: { select: { _count: { select: { identities: true } } } } }, orderBy: { createdAt: "desc" } });
   }
 
@@ -220,6 +223,7 @@ export class AppController {
   @Get("v1/products/:id/batches")
   @UseGuards(AuthGuard)
   async batches(@Req() req: AuthRequest, @Param("id") id: string) {
+    await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR", "ANALYST"]);
     const product = await this.db.product.findFirst({ where: { id, manufacturerId: req.user.manufacturerId } });
     if (!product) throw new NotFoundException("Product not found");
     return this.db.batch.findMany({ where: { productId: id }, include: { _count: { select: { identities: true } } }, orderBy: { createdAt: "desc" } });
@@ -288,7 +292,7 @@ export class AppController {
       this.db.verificationEvent.create({ data: { identityId: identity.id, outcome: "MANUAL_" + outcome } })
     ]);
     const batch = identity.batch; const product = batch.product;
-    return { status: outcome, title: outcome === "VERIFIED" ? "Product identity verified" : outcome === "PREVIOUSLY_SCANNED" ? "This identity has been scanned before" : outcome === "UNDER_REVIEW" ? "Product under review" : outcome === "MANUFACTURER_PENDING" ? "Manufacturer review pending" : "Identity revoked", message: outcome === "VERIFIED" ? "This code matches an active identity in the PAN network. No known issue has been recorded for this identity." : outcome === "PREVIOUSLY_SCANNED" ? "This code has been checked before. This is not proof of counterfeiting; compare the product details and contact the manufacturer if anything looks unusual." : outcome === "UNDER_REVIEW" ? "This identity is temporarily under review. Contact the manufacturer before relying on this product." : outcome === "MANUFACTURER_PENDING" ? "This code matches an identity record, but the manufacturer has not yet completed PAN approval. This is not a PAN endorsement of the product." : "This identity is no longer active in the PAN network.", product: { name: product.name, brand: product.brand, category: product.category, manufacturer: product.manufacturer.legalName, batchCode: batch.batchCode, productionDate: batch.productionDate, expiryDate: batch.expiryDate, packaging: { identityLevel: identity.level, cartonCode: identity.carton?.publicCode ?? null, containedUnitCount: identity.level === "CARTON" ? identity._count.containedUnits : null }, regulatoryReferences: { nafdacRegistrationNumber: product.nafdacRegistrationNumber, sonCertificateNumber: product.sonCertificateNumber, source: "PRODUCER_PROVIDED_NOT_VERIFIED_BY_PAN" } }, checkedAt: now.toISOString(), scansRecorded: identity.verificationCount + 1 };
+    return { status: outcome, title: outcome === "VERIFIED" ? "PAN identity matched" : outcome === "PREVIOUSLY_SCANNED" ? "This identity has been scanned before" : outcome === "UNDER_REVIEW" ? "Product under review" : outcome === "MANUFACTURER_PENDING" ? "Manufacturer review pending" : "Identity revoked", message: outcome === "VERIFIED" ? "This code matches an active identity issued under the named producer’s PAN workspace. It indicates that the code was issued under this producer account; it does not independently prove the physical item was made by that producer or validate its contents, quality or regulatory status." : outcome === "PREVIOUSLY_SCANNED" ? "This code has been checked before. This is not proof of counterfeiting; compare the product details and contact the manufacturer if anything looks unusual." : outcome === "UNDER_REVIEW" ? "This identity is temporarily under review. Contact the manufacturer before relying on this product." : outcome === "MANUFACTURER_PENDING" ? "This code matches an identity record, but the manufacturer has not yet completed PAN approval. This is not a PAN endorsement of the product." : "This identity is no longer active in the PAN network.", product: { name: product.name, brand: product.brand, category: product.category, manufacturer: product.manufacturer.legalName, batchCode: batch.batchCode, productionDate: batch.productionDate, expiryDate: batch.expiryDate, packaging: { identityLevel: identity.level, cartonCode: identity.carton?.publicCode ?? null, containedUnitCount: identity.level === "CARTON" ? identity._count.containedUnits : null }, regulatoryReferences: { nafdacRegistrationNumber: product.nafdacRegistrationNumber, sonCertificateNumber: product.sonCertificateNumber, source: "PRODUCER_PROVIDED_NOT_VERIFIED_BY_PAN" } }, checkedAt: now.toISOString(), scansRecorded: identity.verificationCount + 1 };
   }
 
   @Get("v1/verify/:token")
