@@ -1,35 +1,32 @@
 # Product Authentication Network (PAN)
 
-A product identity and verification platform designed to give every individual product unit a secure digital identity.
+PAN is a producer-linked product identity network. It issues unique digital identities for individual product units and outer cartons, and lets consumers check whether a scanned identity exists in the PAN network under the named producer's workspace.
 
-## Applications
+## User-facing applications
 
-- **Manufacturer portal** — account creation, product catalogue, production batches, QR identity issuance and export.
-- **Consumer mobile app** — Android/iOS QR scanning, manual code lookup and plain-language verification results.
-- **Public verification website** — browser-based QR and manual-code verification without an account or app installation.
-- **PAN API** — shared NestJS API and PostgreSQL data store. This is the platform backend, not a fourth user-facing application.
+- Manufacturer workspace: producer onboarding, company profile, facilities, private documents, team roles, product catalogue, batches and Code Studio.
+- Consumer mobile app: QR scanning and manual identity lookup.
+- Public verification website: browser verification without an account or app installation.
+- Super administrator console: producer review, document review, identity oversight and audit trail.
 
-## Current implementation
+The NestJS API and PostgreSQL database are shared infrastructure, not a fourth user-facing application.
 
-The `feat/pan-functional-core` branch contains the first connected end-to-end vertical slice, with GitHub Actions typechecking all clients and running a PostgreSQL-backed API smoke test:
+## Product identity model
 
-1. A manufacturer creates an account and a pending workspace.
-2. The manufacturer signs in and manages products and production batches.
-3. The manufacturer issues unique per-unit identities, with QR images and a CSV export.
-4. A consumer scans the QR with a phone camera or enters the printed PAN ID.
-5. The API checks the identity record and returns a consumer-facing result.
-6. Manufacturer approval is required before an identity is described as normally verified.
+- Individual-unit identity (PANU-…) is a unique identity attached to one retail/product unit.
+- Carton identity (PANC-…) is a separate identity attached to an outer carton. The carton record links to the individual-unit identities assigned to that carton.
+- A carton and each unit have different QR codes and public identity records. The manufacturer or its packaging supplier applies the generated assets to the correct packaging level.
+- Bulk issuance is queued in the API worker. Export payloads are encrypted at rest and have a limited retrieval window.
+- Exports include QR PNGs, a CSV manifest and a print-ready PDF label sheet.
 
-The dashboard at the root of the manufacturer app remains a visual prototype using illustrative data. The working manufacturer console is at `/portal`.
+## What PAN says — and does not say
 
-## Local development
+A successful PAN result means the code matches an active digital identity issued under the named producer's PAN workspace. It does not independently prove that the physical item was made by that producer, that the contents are genuine, safe or of a particular quality, or that the product is registered or approved by NAFDAC, SON or another regulator.
 
-- Node.js 20.11+
-- pnpm 9.15.4
-- Docker Desktop / Docker Engine
+CAC, NAFDAC and SON references submitted by a producer are displayed as producer-provided information unless and until PAN has a genuine authorised validation integration. PAN approval is PAN's own onboarding decision, not government approval.
 
-See [Getting started](docs/GETTING-STARTED.md) and [API setup](apps/api/README.md). Never commit secrets or real consumer data.
+## Development and deployment
 
-## Important limitations
+See Getting started, API setup, system architecture, and security and privacy documentation.
 
-This is an MVP development build, not a production-ready anti-counterfeiting certification service. Email verification/recovery, full administrator console, identity quarantine/revocation controls, rate limiting, audit review, large asynchronous issuance, deployment configuration, security testing and Nigerian NDPA review remain outstanding. A PAN QR identity confirms a database record, not the physical contents, product quality, or NAFDAC/SON approval.
+The current development branch is feat/pan-market-ready-operations. CI validates Prisma migrations, the API smoke journey, and TypeScript checks for the API, manufacturer portal, public verification website and consumer app. Production deployment, SMTP, private S3 storage, super-admin credentials, threat modelling and independent privacy/security review must be configured before public launch.
