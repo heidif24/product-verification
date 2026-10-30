@@ -5,74 +5,59 @@
 - Node.js 20.11 or newer
 - pnpm 9.15.4
 - Docker with Compose
+- SMTP account for transactional email (optional locally; required in production)
+- S3-compatible private object storage for company documents (required for document upload)
 
-## Start the database
+## Start PostgreSQL
 
-From the repository root:
+From the repository root, run: docker compose up -d postgres
 
-```bash
-docker compose up -d postgres
-```
+## Configure the API
 
-## Configure and start the API
+Copy apps/api/.env.example to apps/api/.env. Generate independent random secrets for JWT signing, token HMAC and export encryption. The export encryption key must be exactly 32 random bytes represented as 64 hexadecimal characters.
 
-Copy `apps/api/.env.example` to `apps/api/.env`. Replace `JWT_SECRET`, `TOKEN_PEPPER` and `ADMIN_API_KEY` with three independent random values of at least 32 characters.
+Generate a super-admin password hash locally using bcryptjs:
 
-```bash
-pnpm install
-pnpm --filter @pan/api db:generate
-pnpm --filter @pan/api db:deploy
-pnpm --filter @pan/api dev
-```
+PAN_ADMIN_PASSWORD='use-a-unique-long-password' node -e "require('bcryptjs').hash(process.env.PAN_ADMIN_PASSWORD, 12).then(console.log)"
 
-The API is available at `http://localhost:4000/api`. In a second terminal, run `pnpm --filter @pan/api smoke` to test the complete API journey against your local database.
+Put the resulting hash in SUPER_ADMIN_PASSWORD_HASH and configure SUPER_ADMIN_EMAIL. Do not use the same password for a manufacturer account.
 
-## Start the manufacturer portal
+Configure SMTP for verification, password recovery and invitations. Configure a private S3 bucket or compatible storage service for documents; enable bucket encryption, block public access, and configure CORS to permit PUT from the manufacturer portal origin only. Do not make the document bucket public.
 
-In another terminal:
+Run:
+- pnpm install
+- pnpm --filter @pan/api db:generate
+- pnpm --filter @pan/api db:deploy
+- pnpm --filter @pan/api dev
 
-```bash
-pnpm --filter @pan/manufacturer-web dev
-```
+API: http://localhost:4000/api.
 
-Open `http://localhost:3000/portal` to register a manufacturer account and create products, batches and QR identities.
+## Manufacturer workspace
 
-## Start public verification
+Run pnpm --filter @pan/manufacturer-web dev and open http://localhost:3000/portal.
 
-```bash
-pnpm --filter @pan/verification-web dev
-```
+The workspace provides company profile and CAC reference, facilities, private supporting-document upload, team invitations and roles, products, producer-supplied regulatory references, production batches, and Code Studio for separate carton and individual-unit identities. Code Studio provides queued generation, QR PNG ZIP, CSV manifest and print-ready PDF labels.
 
-Open `http://localhost:3001`. Scan a generated QR code with a phone camera or enter its PAN code manually.
+Email verification is required before manufacturer login. Local development without SMTP logs verification links in the API terminal; test mode exposes verification tokens only to automated CI tests.
 
-## Start the consumer app
+## Public verification
 
-Set `EXPO_PUBLIC_PAN_API_URL` to an API URL reachable from the device. Android emulator default: `http://10.0.2.2:4000/api`; iOS simulator default can be `http://localhost:4000/api`; a physical phone needs the development machine's LAN IP.
+Run pnpm --filter @pan/verification-web dev and open http://localhost:3001. Consumers can scan a QR with their phone camera or enter a PAN code manually.
 
-```bash
-pnpm --filter @pan/consumer-mobile start
-```
+## Consumer app
 
-## Approve a manufacturer workspace for trusted verification
+Set EXPO_PUBLIC_PAN_API_URL to an API URL reachable from the device. Android emulator default: http://10.0.2.2:4000/api; iOS simulator default can be http://localhost:4000/api; a physical phone needs the development machine's LAN IP.
 
-New workspaces are pending. After an operator has reviewed the company outside this MVP, use the internal API key and workspace ID to approve it:
+Run pnpm --filter @pan/consumer-mobile start.
 
-```bash
-curl -X POST http://localhost:4000/api/v1/admin/manufacturers/WORKSPACE_ID/approve \
-  -H "x-pan-admin-key: YOUR_ADMIN_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"reason":"Company identity and submitted records reviewed"}'
-```
+## Super administrator console
 
-The API approval endpoint is protected by the separate `ADMIN_API_KEY`; never expose this key to a browser or mobile app. The same key protects the pending-manufacturer list, identity quarantine/release/revocation actions, and the administrator audit feed. Every approval or identity-state change requires a reason and creates an audit record.
+Open http://localhost:3000/admin and sign in with SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD_HASH. The short-lived super-admin JWT is held in session storage, not local storage. Company status changes, document decisions and identity actions require a reason and are written to the audit trail.
 
-## Check quality
+PAN approval means PAN has completed its own producer onboarding review. It is not NAFDAC registration, SON certification, product testing or government endorsement.
 
-```bash
-pnpm --filter @pan/api typecheck
-pnpm --filter @pan/manufacturer-web typecheck
-pnpm --filter @pan/verification-web typecheck
-pnpm --filter @pan/consumer-mobile typecheck
-```
+## Quality checks
 
-GitHub Actions installs the workspace dependencies and typechecks the API and all three client applications on this development branch. A generated pnpm lockfile is not yet committed. Full browser/API integration testing against a running PostgreSQL instance, production builds, and testing on physical Android/iOS devices are still required before launch.
+Run the API, manufacturer web, verification web and consumer mobile typechecks, plus pnpm --filter @pan/api smoke.
+
+Before public launch, run production builds and browser/device tests, configure SMTP and private storage, review deployment security, complete a privacy impact assessment where required, and obtain Nigerian data-protection and legal review.
