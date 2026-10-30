@@ -1,0 +1,105 @@
+name: PAN consumer Android device test
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: pan-consumer-android-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  android-emulator-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pan
+          POSTGRES_PASSWORD: pan_local_password
+          POSTGRES_DB: pan
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pan -d pan"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://pan:pan_local_password@localhost:5432/pan?schema=public
+      NODE_ENV: test
+      JWT_SECRET: ci-only-jwt-secret-0123456789-abcdefghijklmnopqrstuvwxyz
+      TOKEN_PEPPER: ci-only-token-pepper-0123456789-abcdefghijklmnopqrstuvwxyz
+      EXPORT_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      SUPER_ADMIN_EMAIL: admin@pan.test
+      SUPER_ADMIN_PASSWORD_HASH: $2a$12$invalid-test-hash-placeholder
+      ADMIN_API_KEY: ci-only-admin-key-0123456789-abcdefghijklmnopqrstuvwxyz
+      PUBLIC_VERIFY_URL: http://localhost:3001
+      CORS_ORIGINS: http://localhost:3000,http://localhost:3001
+      PORT: 4000
+      PAN_API_URL: http://localhost:4000/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm --filter @pan/api typecheck
+      - name: Create isolated CI super-admin password hash
+        run: |
+          HASH=$(pnpm --filter @pan/api exec node -e 'require("bcryptjs").hash("PAN-CI-SuperAdmin-2026!", 4).then(hash => process.stdout.write(hash))')
+          echo "SUPER_ADMIN_PASSWORD_HASH=$HASH" >> "$GITHUB_ENV"
+      - run: pnpm --filter @pan/api db:deploy
+      - name: Start API
+        run: |
+          pnpm --filter @pan/api dev > /tmp/pan-api.log 2>&1 &
+          for i in {1..45}; do
+            if curl -fsS http://localhost:4000/api/health/ready >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/pan-api.log
+          exit 1
+      - name: Seed backend and run API end-to-end smoke
+        run: |
+          pnpm --filter @pan/api smoke 2>&1 | tee /tmp/pan-api-smoke.log
+          CODE=$(grep '^PAN_MOBILE_SMOKE_CODE=' /tmp/pan-api-smoke.log | tail -1 | cut -d= -f2)
+          test -n "$CODE"
+          echo "PAN_MOBILE_SMOKE_CODE=$CODE" >> "$GITHUB_ENV"
+      - name: Generate Android project and build installable debug APK
+        env:
+          EXPO_PUBLIC_PAN_API_URL: http://10.0.2.2:4000/api
+        run: |
+          pnpm --filter @pan/consumer-mobile exec expo prebuild --platform android --no-install
+          cd apps/consumer-mobile/android
+          ./gradlew --no-daemon assembleDebug
+      - name: Install Maestro UI test runner
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Install and exercise PAN Verify on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          script: |
+            adb install apps/consumer-mobile/android/app/build/outputs/apk/debug/app-debug.apk
+            maestro --version
+            maestro test .maestro/consumer-verification.yaml
+      - name: Upload installable Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: pan-verify-android-debug-apk
+          path: apps/consumer-mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
