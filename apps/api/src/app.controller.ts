@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards, BadRequestException, NotFoundException, ConflictException, ForbiddenException } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Req, UseGuards, BadRequestException, NotFoundException, ConflictException, ForbiddenException, Query } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import * as bcrypt from "bcryptjs";
@@ -53,15 +53,57 @@ export class AppController {
     return { accessToken, user: { id: user.id, fullName: user.fullName, email: user.email }, workspace: { id: manufacturerId, role } };
   }
 
-  @Post("v1/admin/manufacturers/:id/approve")
-  @Public()
-  async approveManufacturer(@Req() req: AuthRequest, @Param("id") id: string) {
+  private assertAdmin(req: AuthRequest) {
     const provided = req.headers["x-pan-admin-key"];
     const expected = process.env.ADMIN_API_KEY || "";
     if (typeof provided !== "string" || !expected || provided.length !== expected.length || !timingSafeEqual(Buffer.from(provided), Buffer.from(expected))) {
       throw new ForbiddenException("Administrator credentials are invalid.");
     }
-    return this.db.manufacturer.update({ where: { id }, data: { status: "APPROVED" }, select: { id: true, legalName: true, status: true, updatedAt: true } });
+  }
+
+  @Get("v1/admin/manufacturers")
+  @Public()
+  async adminManufacturers(@Req() req: AuthRequest, @Query("status") status = "PENDING") {
+    this.assertAdmin(req);
+    const allowed = ["PENDING", "APPROVED", "SUSPENDED"];
+    if (!allowed.includes(status)) throw new BadRequestException("Unknown manufacturer status.");
+    return this.db.manufacturer.findMany({ where: { status: status as any }, include: { _count: { select: { products: true, memberships: true } } }, orderBy: { createdAt: "asc" } });
+  }
+
+  @Post("v1/admin/manufacturers/:id/approve")
+  @Public()
+  async approveManufacturer(@Req() req: AuthRequest, @Param("id") id: string, @Body() body: { reason?: string }) {
+    this.assertAdmin(req);
+    const reason = body.reason?.trim();
+    if (!reason || reason.length < 10) throw new BadRequestException("Record a review reason of at least 10 characters.");
+    return this.db.$transaction(async tx => {
+      const manufacturer = await tx.manufacturer.update({ where: { id }, data: { status: "APPROVED" }, select: { id: true, legalName: true, status: true, updatedAt: true } });
+      await tx.auditLog.create({ data: { actor: "PAN_ADMIN", action: "MANUFACTURER_APPROVED", targetType: "MANUFACTURER", targetId: id, reason } });
+      return manufacturer;
+    });
+  }
+
+  @Post("v1/admin/identities/:id/:action")
+  @Public()
+  async updateIdentityStatus(@Req() req: AuthRequest, @Param("id") id: string, @Param("action") action: string, @Body() body: { reason?: string }) {
+    this.assertAdmin(req);
+    const states: Record<string, "ACTIVE" | "QUARANTINED" | "REVOKED"> = { release: "ACTIVE", quarantine: "QUARANTINED", revoke: "REVOKED" };
+    const status = states[action];
+    const reason = body.reason?.trim();
+    if (!status) throw new BadRequestException("Action must be release, quarantine or revoke.");
+    if (!reason || reason.length < 10) throw new BadRequestException("Record a reason of at least 10 characters.");
+    return this.db.$transaction(async tx => {
+      const identity = await tx.productIdentity.update({ where: { id }, data: { status }, select: { id: true, publicCode: true, status: true, batchId: true } });
+      await tx.auditLog.create({ data: { actor: "PAN_ADMIN", action: "IDENTITY_" + action.toUpperCase(), targetType: "PRODUCT_IDENTITY", targetId: id, reason } });
+      return identity;
+    });
+  }
+
+  @Get("v1/admin/audit")
+  @Public()
+  async adminAudit(@Req() req: AuthRequest) {
+    this.assertAdmin(req);
+    return this.db.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: 100 });
   }
 
   @Get("v1/manufacturer/me")
@@ -70,6 +112,20 @@ export class AppController {
     const manufacturer = await this.db.manufacturer.findUnique({ where: { id: req.user.manufacturerId }, include: { _count: { select: { products: true, memberships: true } } } });
     if (!manufacturer) throw new NotFoundException("Workspace not found");
     return { ...manufacturer, counts: manufacturer._count };
+  }
+
+  @Get("v1/analytics/overview")
+  async analytics(@Req() req: AuthRequest) {
+    const manufacturerId = req.user.manufacturerId;
+    const identityWhere = { batch: { product: { manufacturerId } } };
+    const [products, batches, identities, scans, recent] = await Promise.all([
+      this.db.product.count({ where: { manufacturerId } }),
+      this.db.batch.count({ where: { product: { manufacturerId } } }),
+      this.db.productIdentity.count({ where: identityWhere }),
+      this.db.verificationEvent.count({ where: { identity: { is: { batch: { product: { manufacturerId } } } } } }),
+      this.db.verificationEvent.findMany({ where: { identity: { is: { batch: { product: { manufacturerId } } } } }, include: { identity: { include: { batch: { include: { product: true } } } } }, orderBy: { createdAt: "desc" }, take: 8 })
+    ]);
+    return { products, batches, identities, scans, recent: recent.map(event => ({ id: event.id, outcome: event.outcome, createdAt: event.createdAt, code: event.identity?.publicCode ?? null, product: event.identity?.batch.product.name ?? null, batchCode: event.identity?.batch.batchCode ?? null })) };
   }
 
   @Get("v1/products")
