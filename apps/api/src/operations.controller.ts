@@ -175,7 +175,7 @@ export class ManufacturerOperationsController {
     if (!kinds.includes(body.kind || "") || !body.fileName?.trim() || !allowedTypes.includes(body.mimeType || "") || !Number.isInteger(body.sizeBytes) || Number(body.sizeBytes) < 1 || Number(body.sizeBytes) > 10 * 1024 * 1024) throw new BadRequestException("Upload a PDF, JPG or PNG document up to 10 MB and select its document type.");
     const key = privateDocumentKey(req.user.manufacturerId, body.fileName);
     const uploadUrl = await createPrivateUploadUrl(key, body.mimeType!, Number(body.sizeBytes));
-    return { key, uploadUrl, expiresIn: 600, requiredHeaders: { "Content-Type": body.mimeType } };
+    return { key, uploadUrl, expiresIn: 600, requiredHeaders: { "Content-Type": body.mimeType, "x-amz-server-side-encryption": "AES256" } };
   }
   @Post("documents/confirm")
   async confirmDocument(@Req() req: AuthRequest, @Body() body: { key?: string; kind?: string; fileName?: string; mimeType?: string; sizeBytes?: number }) {
