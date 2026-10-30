@@ -22,6 +22,7 @@ model User {
   email           String             @unique
   passwordHash    String
   emailVerifiedAt DateTime?
+  tokenVersion    Int                @default(0)
   memberships     Membership[]
   verificationTokens VerificationToken[]
   createdAt       DateTime           @default(now())
