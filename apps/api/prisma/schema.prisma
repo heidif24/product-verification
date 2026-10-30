@@ -97,3 +97,14 @@ model VerificationEvent {
   createdAt  DateTime        @default(now())
   @@index([identityId, createdAt])
 }
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actor      String
+  action     String
+  targetType String
+  targetId   String
+  reason     String
+  createdAt  DateTime @default(now())
+  @@index([targetType, targetId, createdAt])
+}
