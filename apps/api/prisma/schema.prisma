@@ -1,0 +1,284 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ManufacturerStatus {
+  PENDING
+  APPROVED
+  SUSPENDED
+}
+enum MembershipRole {
+  OWNER
+  ADMIN
+  OPERATOR
+  ANALYST
+}
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+enum IdentityStatus {
+  ACTIVE
+  QUARANTINED
+  REVOKED
+}
+enum IdentityLevel {
+  UNIT
+  CARTON
+}
+enum DocumentReviewStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  ACCEPTED
+  REJECTED
+}
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+enum IssuanceJobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+model User {
+  id              String             @id @default(cuid())
+  fullName        String
+  email           String             @unique
+  passwordHash    String
+  emailVerifiedAt DateTime?
+  tokenVersion    Int                @default(0)
+  memberships     Membership[]
+  verificationTokens VerificationToken[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+}
+
+model Manufacturer {
+  id                 String                 @id @default(cuid())
+  legalName          String
+  slug               String                 @unique
+  status             ManufacturerStatus     @default(PENDING)
+  registrationNumber String?
+  registeredAddress String?
+  phone              String?
+  website            String?
+  industry           String?
+  memberships        Membership[]
+  products           Product[]
+  facilities         Facility[]
+  documents          ManufacturerDocument[]
+  invitations        Invitation[]
+  issuanceJobs       IssuanceJob[]
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+}
+
+model Membership {
+  id             String         @id @default(cuid())
+  userId         String
+  manufacturerId String
+  role           MembershipRole @default(OWNER)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  manufacturer   Manufacturer   @relation(fields: [manufacturerId], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now())
+  @@unique([userId, manufacturerId])
+  @@index([manufacturerId])
+}
+
+model VerificationToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  purpose   String
+  expiresAt DateTime
+  usedAt    DateTime?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@index([userId, purpose, expiresAt])
+}
+
+model Facility {
+  id             String       @id @default(cuid())
+  manufacturerId String
+  name           String
+  facilityType   String
+  address        String
+  city           String
+  state          String
+  country        String       @default("Nigeria")
+  isPrimary      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  manufacturer   Manufacturer @relation(fields: [manufacturerId], references: [id], onDelete: Cascade)
+  @@index([manufacturerId])
+}
+
+model ManufacturerDocument {
+  id             String               @id @default(cuid())
+  manufacturerId String
+  kind           String
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  storageKey     String               @unique
+  reviewStatus   DocumentReviewStatus @default(SUBMITTED)
+  reviewNote     String?
+  uploadedAt     DateTime             @default(now())
+  reviewedAt     DateTime?
+  manufacturer   Manufacturer         @relation(fields: [manufacturerId], references: [id], onDelete: Cascade)
+  @@index([manufacturerId, reviewStatus])
+}
+
+model Invitation {
+  id             String         @id @default(cuid())
+  manufacturerId String
+  email          String
+  role           MembershipRole
+  tokenHash      String         @unique
+  status         InvitationStatus @default(PENDING)
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  manufacturer   Manufacturer   @relation(fields: [manufacturerId], references: [id], onDelete: Cascade)
+  @@index([manufacturerId, status])
+}
+
+model Product {
+  id                       String        @id @default(cuid())
+  manufacturerId           String
+  name                     String
+  brand                    String?
+  category                 String?
+  description              String?
+  nafdacRegistrationNumber String?
+  sonCertificateNumber     String?
+  status                   ProductStatus @default(ACTIVE)
+  manufacturer             Manufacturer  @relation(fields: [manufacturerId], references: [id], onDelete: Cascade)
+  batches                  Batch[]
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+  @@index([manufacturerId, createdAt])
+}
+
+model Batch {
+  id             String            @id @default(cuid())
+  productId      String
+  batchCode      String
+  productionDate DateTime?
+  expiryDate     DateTime?
+  quantity       Int               @default(0)
+  cartonCount    Int?
+  unitsPerCarton Int?
+  product        Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  identities     ProductIdentity[]
+  issuanceJobs   IssuanceJob[]
+  createdAt      DateTime          @default(now())
+  @@unique([productId, batchCode])
+  @@index([productId])
+}
+
+model ProductIdentity {
+  id                String         @id @default(cuid())
+  batchId           String
+  publicCode        String         @unique
+  tokenHash         String         @unique
+  level             IdentityLevel  @default(UNIT)
+  parentId          String?
+  status            IdentityStatus @default(ACTIVE)
+  verificationCount Int            @default(0)
+  firstVerifiedAt   DateTime?
+  lastVerifiedAt    DateTime?
+  batch             Batch          @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  carton            ProductIdentity? @relation("IdentityPackaging", fields: [parentId], references: [id], onDelete: SetNull)
+  containedUnits    ProductIdentity[] @relation("IdentityPackaging")
+  reports           ConsumerReport[]
+  events            VerificationEvent[]
+  issuedAt          DateTime       @default(now())
+  @@index([batchId, status])
+  @@index([parentId])
+  @@index([batchId, level])
+}
+
+model IssuanceJob {
+  id                  String            @id @default(cuid())
+  manufacturerId      String
+  batchId             String
+  createdById         String
+  unitQuantity        Int
+  cartonQuantity      Int               @default(0)
+  status              IssuanceJobStatus @default(QUEUED)
+  progress            Int               @default(0)
+  resultCiphertext    String?
+  errorMessage        String?
+  expiresAt           DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  manufacturer        Manufacturer      @relation(fields: [manufacturerId], references: [id], onDelete: Cascade)
+  batch               Batch             @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  @@index([manufacturerId, createdAt])
+  @@index([status, createdAt])
+}
+
+model VerificationEvent {
+  id         String          @id @default(cuid())
+  identityId String?
+  outcome    String
+  identity   ProductIdentity? @relation(fields: [identityId], references: [id], onDelete: SetNull)
+  createdAt  DateTime        @default(now())
+  @@index([identityId, createdAt])
+  @@index([createdAt])
+}
+
+model ConsumerReport {
+  id           String          @id @default(cuid())
+  identityId   String?
+  publicCode   String?
+  reason       String
+  details      String
+  contactEmail String?
+  status       String          @default("OPEN")
+  adminNote    String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  identity     ProductIdentity? @relation(fields: [identityId], references: [id], onDelete: SetNull)
+  @@index([status, createdAt])
+  @@index([identityId, createdAt])
+  @@index([publicCode])
+}
+
+model PrivacyRequest {
+  id          String   @id @default(cuid())
+  email       String
+  requestType String
+  details     String
+  status      String   @default("RECEIVED")
+  adminNote   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([status, createdAt])
+  @@index([email, createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actor      String
+  action     String
+  targetType String
+  targetId   String
+  reason     String
+  createdAt  DateTime @default(now())
+  @@index([targetType, targetId, createdAt])
+  @@index([createdAt])
+}
