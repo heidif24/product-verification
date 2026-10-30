@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { SafeAreaView, View, Text, StyleSheet, StatusBar, Pressable, TextInput, ActivityIndicator, ScrollView } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { Fingerprint, ScanLine, ShieldCheck, AlertTriangle, ArrowLeft, Info, Keyboard } from "lucide-react-native";
+import { Fingerprint, ScanLine, ShieldCheck, AlertTriangle, Info, Keyboard } from "lucide-react-native";
 
 const API = process.env.EXPO_PUBLIC_PAN_API_URL || "http://10.0.2.2:4000/api";
 type VerifyResult = { status:string; title:string; message:string; product?:{name:string;brand?:string|null;manufacturer:string;batchCode:string;category?:string|null;productionDate?:string|null;expiryDate?:string|null}; checkedAt?:string; scansRecorded?:number };
