@@ -7,14 +7,50 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum ManufacturerStatus { PENDING APPROVED SUSPENDED }
-enum MembershipRole { OWNER ADMIN OPERATOR ANALYST }
-enum ProductStatus { DRAFT ACTIVE ARCHIVED }
-enum IdentityStatus { ACTIVE QUARANTINED REVOKED }
-enum IdentityLevel { UNIT CARTON }
-enum DocumentReviewStatus { SUBMITTED UNDER_REVIEW ACCEPTED REJECTED }
-enum InvitationStatus { PENDING ACCEPTED REVOKED EXPIRED }
-enum IssuanceJobStatus { QUEUED PROCESSING COMPLETED FAILED EXPIRED }
+enum ManufacturerStatus {
+  PENDING
+  APPROVED
+  SUSPENDED
+}
+enum MembershipRole {
+  OWNER
+  ADMIN
+  OPERATOR
+  ANALYST
+}
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+enum IdentityStatus {
+  ACTIVE
+  QUARANTINED
+  REVOKED
+}
+enum IdentityLevel {
+  UNIT
+  CARTON
+}
+enum DocumentReviewStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  ACCEPTED
+  REJECTED
+}
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+enum IssuanceJobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
 
 model User {
   id              String             @id @default(cuid())
