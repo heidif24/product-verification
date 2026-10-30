@@ -126,6 +126,21 @@ export class AppController {
     return { issued: created.count, batch: { id: batch.id, batchCode: batch.batchCode }, product: { name: batch.product.name, brand: batch.product.brand }, identities: assets, notice: "Each QR identity is unique. Keep this export secure: verification URLs contain bearer tokens." };
   }
 
+  @Get("v1/verify/code/:code")
+  @Public()
+  async verifyCode(@Param("code") code: string) {
+    const identity = await this.db.productIdentity.findUnique({ where: { publicCode: code.trim().toUpperCase() }, include: { batch: { include: { product: { include: { manufacturer: true } } } } } });
+    if (!identity) throw new NotFoundException("This product ID is not recognised.");
+    const now = new Date();
+    const outcome = identity.status === "REVOKED" ? "REVOKED" : identity.status === "QUARANTINED" ? "UNDER_REVIEW" : identity.verificationCount > 0 ? "PREVIOUSLY_SCANNED" : "VERIFIED";
+    await this.db.$transaction([
+      this.db.productIdentity.update({ where: { id: identity.id }, data: { verificationCount: { increment: 1 }, firstVerifiedAt: identity.firstVerifiedAt ?? now, lastVerifiedAt: now } }),
+      this.db.verificationEvent.create({ data: { identityId: identity.id, outcome: "MANUAL_" + outcome } })
+    ]);
+    const { product, batch } = identity.batch;
+    return { status: outcome, title: outcome === "VERIFIED" ? "Product identity verified" : outcome === "PREVIOUSLY_SCANNED" ? "This identity has been scanned before" : outcome === "UNDER_REVIEW" ? "Product under review" : "Identity revoked", message: outcome === "VERIFIED" ? "This code matches an active identity in the PAN network. No known issue has been recorded for this identity." : outcome === "PREVIOUSLY_SCANNED" ? "This code has been checked before. This is not proof of counterfeiting; compare the product details and contact the manufacturer if anything looks unusual." : outcome === "UNDER_REVIEW" ? "This identity is temporarily under review. Contact the manufacturer before relying on this product." : "This identity is no longer active in the PAN network.", product: { name: product.name, brand: product.brand, category: product.category, manufacturer: product.manufacturer.legalName, batchCode: batch.batchCode, productionDate: batch.productionDate, expiryDate: batch.expiryDate }, checkedAt: now.toISOString(), scansRecorded: identity.verificationCount + 1 };
+  }
+
   @Get("v1/verify/:token")
   @Public()
   async verify(@Param("token") token: string) {
