@@ -19,7 +19,7 @@ export default function Portal() {
   const [issueQty,setIssueQty]=useState("10"); const [issued,setIssued]=useState<Identity[]>([]);
   const headers=()=>({ "Content-Type":"application/json", ...(token?{Authorization:"Bearer "+token}:{}) });
   async function request(path:string, init:RequestInit={}) {
-    const res=await fetch(API+path,{...init,headers:{...headers(),...(init.headers||{})}});
+    const h:Record<string,string>={ "Content-Type":"application/json", ...(token?{Authorization:"Bearer "+token}:{}) }; Object.assign(h,init.headers||{}); const res=await fetch(API+path,{...init,headers:h});
     const data=await res.json().catch(()=>({message:"Unexpected server response"}));
     if(!res.ok) throw new Error(data.message || "Request failed");
     return data;
