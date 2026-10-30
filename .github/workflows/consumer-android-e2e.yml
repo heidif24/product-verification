@@ -94,7 +94,7 @@ jobs:
           script: |
             adb install apps/consumer-mobile/android/app/build/outputs/apk/debug/app-debug.apk
             maestro --version
-            maestro test .maestro/consumer-verification.yaml
+            maestro test -e PAN_MOBILE_SMOKE_CODE="$PAN_MOBILE_SMOKE_CODE" .maestro/consumer-verification.yaml
       - name: Upload installable Android APK
         uses: actions/upload-artifact@v4
         with:
