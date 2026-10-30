@@ -1,4 +1,5 @@
 import { S3Client, PutObjectCommand, HeadObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { randomUUID } from "node:crypto";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { ServiceUnavailableException } from "@nestjs/common";
 
@@ -33,5 +34,5 @@ export async function createPrivateDownloadUrl(key: string) {
 }
 export function privateDocumentKey(manufacturerId: string, filename: string) {
   const safe = filename.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").slice(-90);
-  return "manufacturers/" + manufacturerId + "/documents/" + crypto.randomUUID() + "/" + safe;
+  return "manufacturers/" + manufacturerId + "/documents/" + randomUUID() + "/" + safe;
 }
