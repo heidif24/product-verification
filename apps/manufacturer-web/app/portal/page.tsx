@@ -7,7 +7,8 @@ import "./portal.css";
 const API = process.env.NEXT_PUBLIC_PAN_API_URL || "http://localhost:4000/api";
 type Product = { id:string; name:string; brand?:string|null; category?:string|null; _count?:{batches:number} };
 type Batch = { id:string; batchCode:string; quantity:number; _count?:{identities:number} };
-type Identity = { code:string; verifyUrl:string; qrDataUrl:string };\ntype Overview = { products:number; batches:number; identities:number; scans:number; recent:Array<{id:string;outcome:string;createdAt:string;code:string|null;product:string|null;batchCode:string|null}> };
+type Identity = { code:string; verifyUrl:string; qrDataUrl:string };
+type Overview = { products:number; batches:number; identities:number; scans:number; recent:Array<{id:string;outcome:string;createdAt:string;code:string|null;product:string|null;batchCode:string|null}> };
 
 export default function Portal() {
   const [token,setToken]=useState(""); const [mode,setMode]=useState<"login"|"register">("register");
@@ -31,7 +32,8 @@ export default function Portal() {
     const rows=await res.json(); setProducts(rows);
     if(rows.length && !selected) { setSelected(rows[0]); }
   }
-  async function loadOverview(t=token){const res=await fetch(API+"/v1/analytics/overview",{headers:{Authorization:"Bearer "+t}});if(res.ok)setOverview(await res.json());}\n  async function authenticate(e:FormEvent) {
+  async function loadOverview(t=token){const res=await fetch(API+"/v1/analytics/overview",{headers:{Authorization:"Bearer "+t}});if(res.ok)setOverview(await res.json());}
+  async function authenticate(e:FormEvent) {
     e.preventDefault(); setBusy(true); setNotice("");
     try {
       const data=await request("/v1/auth/"+mode,{method:"POST",body:JSON.stringify(form)});
