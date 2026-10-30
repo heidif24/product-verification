@@ -35,7 +35,7 @@ export default function Portal() {
     try {
       const data=await request("/v1/auth/"+mode,{method:"POST",body:JSON.stringify(form)});
       setToken(data.accessToken); localStorage.setItem("pan_access_token",data.accessToken);
-      setWorkspace(data.workspace?.id || ""); await loadProducts(data.accessToken);
+      const profile=await fetch(API+"/v1/manufacturer/me",{headers:{Authorization:"Bearer "+data.accessToken}}).then(r=>r.json()); setWorkspace(profile.legalName || data.workspace?.id || ""); await loadProducts(data.accessToken);
       setNotice("Your PAN workspace is ready. Add a product to begin.");
     } catch(err:any) { setNotice(err.message); } finally { setBusy(false); }
   }
