@@ -50,7 +50,7 @@ jobs:
           done
           cat /tmp/pan-api.log
           exit 1
-      - run: pnpm --filter @pan/api smoke
+      - name: Run end-to-end API smoke test\n        run: |\n          pnpm --filter @pan/api smoke || { cat /tmp/pan-api.log; exit 1; }
       - run: pnpm --filter @pan/manufacturer-web typecheck
       - run: pnpm --filter @pan/verification-web typecheck
       - run: pnpm --filter @pan/consumer-mobile typecheck
