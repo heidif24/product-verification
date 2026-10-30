@@ -46,10 +46,8 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
         cartons.push({ id: randomUUID(), code, token });
       }
       if (cartons.length) {
-        const created = await this.db.productIdentity.createManyAndReturn({
-          data: cartons.map(c => ({ id: c.id, batchId: job.batchId, publicCode: c.code, tokenHash: digest(c.token), level: "CARTON" }))
-        });
-        cartons.forEach((c, i) => { c.id = created[i].id; assets.push({ code: c.code, level: "CARTON", verifyUrl: baseUrl + "/v/" + c.token, parentCode: null }); });
+        await this.db.productIdentity.createMany({ data: cartons.map(c => ({ id: c.id, batchId: job.batchId, publicCode: c.code, tokenHash: digest(c.token), level: "CARTON" })) });
+        cartons.forEach(c => assets.push({ code: c.code, level: "CARTON", verifyUrl: baseUrl + "/v/" + c.token, parentCode: null }));
       }
       const unitRecords: Array<{ batchId: string; publicCode: string; tokenHash: string; level: "UNIT"; parentId: string | null }> = [];
       const unitAssets: ExportAsset[] = [];
@@ -60,10 +58,11 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
         unitRecords.push({ batchId: job.batchId, publicCode: code, tokenHash: digest(token), level: "UNIT", parentId: carton?.id || null });
         unitAssets.push({ code, level: "UNIT", verifyUrl: baseUrl + "/v/" + token, parentCode: carton?.code || null });
       }
-      for (let offset = 0; offset < unitRecords.length; offset += 1000) {
-        await this.db.productIdentity.createMany({ data: unitRecords.slice(offset, offset + 1000) });
-        await this.db.issuanceJob.update({ where: { id: jobId }, data: { progress: Math.min(95, Math.round(((offset + Math.min(1000, unitRecords.length - offset)) / Math.max(1, unitRecords.length)) * 95)) } });
-      }
+      await this.db.issuanceJob.update({ where: { id: jobId }, data: { progress: 25 } });
+      await this.db.$transaction(async tx => {
+        for (let offset = 0; offset < unitRecords.length; offset += 1000) await tx.productIdentity.createMany({ data: unitRecords.slice(offset, offset + 1000) });
+        await tx.issuanceJob.update({ where: { id: jobId }, data: { progress: 90 } });
+      }, { timeout: 120000 });
       assets.push(...unitAssets);
       const ciphertext = encrypt({ assets, product: job.batch.product.name, batchCode: job.batch.batchCode, expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString() });
       await this.db.issuanceJob.update({ where: { id: jobId }, data: { status: "COMPLETED", progress: 100, resultCiphertext: ciphertext, expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000) } });
