@@ -11,7 +11,7 @@ A product identity and verification platform designed to give every individual p
 
 ## Current implementation
 
-The `feat/pan-functional-core` branch contains the first connected end-to-end vertical slice:
+The `feat/pan-functional-core` branch contains the first connected end-to-end vertical slice, with GitHub Actions typechecking all clients and running a PostgreSQL-backed API smoke test:
 
 1. A manufacturer creates an account and a pending workspace.
 2. The manufacturer signs in and manages products and production batches.
