@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Post, Put, Delete, Param, Query, Req, UseGuards, BadRequestException, ForbiddenException, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { JwtService } from "@nestjs/jwt";
 import { createHmac, randomBytes } from "node:crypto";
 import * as bcrypt from "bcryptjs";
@@ -31,6 +32,7 @@ export class SuperAdminAuthController {
   constructor(private jwt: JwtService) {}
   @Post("v1/super-admin/auth/login")
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async login(@Body() body: { email?: string; password?: string }) {
     const email = body.email?.trim().toLowerCase() || "";
     const configuredEmail = (process.env.SUPER_ADMIN_EMAIL || "").trim().toLowerCase();
@@ -193,6 +195,7 @@ export class ManufacturerOperationsController {
     return { members, invitations };
   }
   @Post("team/invitations")
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async invite(@Req() req: AuthRequest, @Body() body: { email?: string; role?: string }) {
     const actor = await workspaceRole(this.db, req, ["OWNER", "ADMIN"]);
     const email = body.email?.trim().toLowerCase(), role = body.role as Role;
@@ -257,8 +260,10 @@ export class ManufacturerOperationsController {
   @Get("issuance-jobs/:id")
   async issuanceJob(@Req() req: AuthRequest, @Param("id") id: string) {
     await workspaceRole(this.db, req, [...roles]);
+    const member = await workspaceRole(this.db, req, ["OWNER", "ADMIN", "OPERATOR"]);
     const job = await this.db.issuanceJob.findFirst({ where: { id, manufacturerId: req.user.manufacturerId } });
     if (!job) throw new NotFoundException("Issuance job not found.");
+    if (job.createdById !== req.user.sub && member.role !== "OWNER" && member.role !== "ADMIN") throw new ForbiddenException("Only the job creator or a workspace administrator can download identity exports.");
     if (job.expiresAt && job.expiresAt < new Date()) {
       await this.db.issuanceJob.update({ where: { id }, data: { status: "EXPIRED", resultCiphertext: null } });
       return { id, status: "EXPIRED", progress: 100, assets: [] };
@@ -285,6 +290,8 @@ export class ManufacturerOperationsController {
     if (!user) {
       if (!body.fullName?.trim() || !body.password || body.password.length < 10) throw new BadRequestException("Enter your name and a password of at least 10 characters.");
       user = await this.db.user.create({ data: { fullName: body.fullName.trim(), email: invitation.email, passwordHash: await bcrypt.hash(body.password, 12), emailVerifiedAt: new Date() } });
+    } else if (!user.emailVerifiedAt) {
+      user = await this.db.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
     }
     await this.db.$transaction([
       this.db.membership.create({ data: { userId: user.id, manufacturerId: invitation.manufacturerId, role: invitation.role } }),
