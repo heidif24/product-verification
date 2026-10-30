@@ -226,7 +226,7 @@ export class AppController {
       this.db.productIdentity.update({ where: { id: identity.id }, data: { verificationCount: { increment: 1 }, firstVerifiedAt: outcome === "VERIFIED" ? now : identity.firstVerifiedAt, lastVerifiedAt: now } }),
       this.db.verificationEvent.create({ data: { identityId: identity.id, outcome } })
     ]);
-    const { product, batch } = identity.batch;
+    const batch = identity.batch; const product = batch.product;
     return {
       status: outcome,
       title: outcome === "VERIFIED" ? "Product identity verified" : outcome === "PREVIOUSLY_SCANNED" ? "This identity has been scanned before" : outcome === "UNDER_REVIEW" ? "Product under review" : outcome === "MANUFACTURER_PENDING" ? "Manufacturer review pending" : "Identity revoked",
