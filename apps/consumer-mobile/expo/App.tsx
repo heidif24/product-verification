@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { SafeAreaView, View, Text, StyleSheet, StatusBar, Pressable, TextInput, ActivityIndicator, Linking, ScrollView } from "react-native";
+import { SafeAreaView, View, Text, StyleSheet, StatusBar, Pressable, TextInput, ActivityIndicator, ScrollView } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Fingerprint, ScanLine, ShieldCheck, AlertTriangle, ArrowLeft, Info, Keyboard } from "lucide-react-native";
 
@@ -14,9 +14,8 @@ export default function App() {
   const [error,setError]=useState("");
   const [code,setCode]=useState("");
   const [showManual,setShowManual]=useState(false);
-  const [lastScan,setLastScan]=useState("");
   async function verify(value:string) {
-    setScanning(false);setLoading(true);setError("");setResult(null);setLastScan(value);
+    setScanning(false);setLoading(true);setError("");setResult(null);
     try {
       const tokenMatch=value.match(/\/v\/([A-Za-z0-9_-]{30,60})/);
       const publicCode=value.match(/PAN-[A-Fa-f0-9]{20}/i)?.[0] || (value.startsWith("PAN-")?value:"");
