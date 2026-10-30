@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, HeadObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, HeadObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { randomUUID } from "node:crypto";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { ServiceUnavailableException } from "@nestjs/common";
@@ -26,6 +26,14 @@ export async function confirmPrivateUpload(key: string, expectedSize: number, ex
   const { client, bucket } = config();
   const head = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
   if (!head.ContentLength || head.ContentLength !== expectedSize || head.ContentType !== expectedMime) throw new Error("Uploaded document size or content type did not match the signed upload.");
+  const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key, Range: "bytes=0-8191" }));
+  const bytes = object.Body ? Buffer.from(await object.Body.transformToByteArray()) : Buffer.alloc(0);
+  const { fileTypeFromBuffer } = await import("file-type");
+  const detected = await fileTypeFromBuffer(bytes);
+  if (!detected || detected.mime !== expectedMime) {
+    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    throw new Error("The uploaded file content does not match the selected document type.");
+  }
   return head;
 }
 export async function createPrivateDownloadUrl(key: string) {
