@@ -25,6 +25,13 @@ export class AppController {
   @Public()
   health() { return { status: "ok", service: "pan-api", timestamp: new Date().toISOString() }; }
 
+  @Get("health/ready")
+  @Public()
+  async readiness() {
+    await this.db.$queryRawUnsafe("SELECT 1");
+    return { status: "ready", database: "connected", timestamp: new Date().toISOString() };
+  }
+
   @Post("v1/auth/register")
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
