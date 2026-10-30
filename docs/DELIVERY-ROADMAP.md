@@ -11,6 +11,7 @@
 - PostgreSQL-backed asynchronous issuance worker, transactional writes, batch quantity guards and encrypted 48-hour export payload.
 - Code Studio with QR PNG ZIP, CSV manifest and print-ready PDF labels.
 - Public verification website, manual code lookup and consumer camera-scanning app.
+- Consumer concern reporting, super-admin triage and producer-recorded expiry status.
 - Privacy notice and terms drafts, plus data-subject request intake.
 
 ## Remaining before pilot
