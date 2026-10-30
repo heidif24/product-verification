@@ -25,6 +25,7 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
     if (this.running) return;
     this.running = true;
     try {
+      await this.db.issuanceJob.updateMany({ where: { status: "PROCESSING", updatedAt: { lt: new Date(Date.now() - 5 * 60 * 1000) } }, data: { status: "QUEUED" } });
       const candidate = await this.db.issuanceJob.findFirst({ where: { status: "QUEUED" }, orderBy: { createdAt: "asc" } });
       if (!candidate) return;
       const claimed = await this.db.issuanceJob.updateMany({ where: { id: candidate.id, status: "QUEUED" }, data: { status: "PROCESSING" } });
