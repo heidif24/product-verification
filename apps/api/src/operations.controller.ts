@@ -22,7 +22,7 @@ async function workspaceRole(db: PrismaService, req: AuthRequest, allowed: Role[
 @Injectable()
 export class SuperAdminGuard {
   canActivate(context: any) {
-    const req = context.switchToHttp().getRequest<AuthRequest>();
+    const req = context.switchToHttp().getRequest() as AuthRequest;
     if (req.user?.role !== "SUPER_ADMIN" || !req.user?.sub) throw new ForbiddenException("Super administrator access is required.");
     return true;
   }
