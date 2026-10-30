@@ -46,7 +46,6 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
         cartons.push({ id: randomUUID(), code, token });
       }
       if (cartons.length) {
-        await this.db.productIdentity.createMany({ data: cartons.map(c => ({ id: c.id, batchId: job.batchId, publicCode: c.code, tokenHash: digest(c.token), level: "CARTON" })) });
         cartons.forEach(c => assets.push({ code: c.code, level: "CARTON", verifyUrl: baseUrl + "/v/" + c.token, parentCode: null }));
       }
       const unitRecords: Array<{ batchId: string; publicCode: string; tokenHash: string; level: "UNIT"; parentId: string | null }> = [];
@@ -60,6 +59,7 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
       }
       await this.db.issuanceJob.update({ where: { id: jobId }, data: { progress: 25 } });
       await this.db.$transaction(async tx => {
+        if (cartons.length) await tx.productIdentity.createMany({ data: cartons.map(c => ({ id: c.id, batchId: job.batchId, publicCode: c.code, tokenHash: digest(c.token), level: "CARTON" })) });
         for (let offset = 0; offset < unitRecords.length; offset += 1000) await tx.productIdentity.createMany({ data: unitRecords.slice(offset, offset + 1000) });
         await tx.issuanceJob.update({ where: { id: jobId }, data: { progress: 90 } });
       }, { timeout: 120000 });
