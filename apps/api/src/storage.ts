@@ -28,9 +28,10 @@ export async function confirmPrivateUpload(key: string, expectedSize: number, ex
   if (!head.ContentLength || head.ContentLength !== expectedSize || head.ContentType !== expectedMime) throw new Error("Uploaded document size or content type did not match the signed upload.");
   const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key, Range: "bytes=0-8191" }));
   const bytes = object.Body ? Buffer.from(await object.Body.transformToByteArray()) : Buffer.alloc(0);
-  const { fileTypeFromBuffer } = await import("file-type");
-  const detected = await fileTypeFromBuffer(bytes);
-  if (!detected || detected.mime !== expectedMime) {
+  const isPdf = expectedMime === "application/pdf" && bytes.subarray(0, 5).toString("ascii") === "%PDF-";
+  const isPng = expectedMime === "image/png" && bytes.subarray(0, 8).toString("hex") === "89504e470d0a1a0a";
+  const isJpeg = expectedMime === "image/jpeg" && bytes.subarray(0, 3).toString("hex") === "ffd8ff";
+  if (!(isPdf || isPng || isJpeg)) {
     await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
     throw new Error("The uploaded file content does not match the selected document type.");
   }
