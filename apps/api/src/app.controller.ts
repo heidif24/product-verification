@@ -5,6 +5,7 @@ import * as bcrypt from "bcryptjs";
 import * as QRCode from "qrcode";
 import { PrismaService } from "./prisma.service";
 import { AuthGuard, AuthRequest, Public } from "./auth";
+import { sendPanEmail } from "./mailer";
 
 const slugify = (value: string) => value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
 const tokenDigest = (token: string) => createHmac("sha256", process.env.TOKEN_PEPPER!).update(token).digest("hex");
@@ -33,7 +34,73 @@ export class AppController {
       await tx.membership.create({ data: { userId: user.id, manufacturerId: manufacturer.id, role: "OWNER" } });
       return { user, manufacturer };
     });
-    return this.session(created.user, created.manufacturer.id, "OWNER");
+    const rawToken = randomBytes(32).toString("base64url");
+    await this.db.verificationToken.create({ data: { userId: created.user.id, tokenHash: tokenDigest(rawToken), purpose: "EMAIL_VERIFICATION", expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) } });
+    const link = (process.env.MANUFACTURER_APP_URL || "http://localhost:3000") + "/verify-email?token=" + encodeURIComponent(rawToken);
+    await sendPanEmail(email, "Verify your PAN manufacturer account", "<p>Welcome to PAN. Confirm your email address to activate your manufacturer login.</p><p><a href=\"" + link + "\">Verify email address</a></p><p>This link expires in 24 hours.</p>");
+    return { verificationRequired: true, message: "Check your email for a verification link before signing in.", ...(process.env.NODE_ENV === "test" ? { testVerificationToken: rawToken } : {}) };
+  }
+
+  @Post("v1/auth/verify-email")
+  @Public()
+  async verifyEmail(@Body() body: { token?: string }) {
+    if (!body.token) throw new BadRequestException("Verification token is required.");
+    const token = await this.db.verificationToken.findUnique({ where: { tokenHash: tokenDigest(body.token) }, include: { user: true } });
+    if (!token || token.purpose !== "EMAIL_VERIFICATION" || token.usedAt || token.expiresAt < new Date()) throw new BadRequestException("This email verification link is invalid or has expired.");
+    await this.db.$transaction([
+      this.db.user.update({ where: { id: token.userId }, data: { emailVerifiedAt: new Date() } }),
+      this.db.verificationToken.update({ where: { id: token.id }, data: { usedAt: new Date() } })
+    ]);
+    return { verified: true, message: "Email address verified. You can now sign in." };
+  }
+
+  @Post("v1/auth/resend-verification")
+  @Public()
+  async resendVerification(@Body() body: { email?: string }) {
+    const email = body.email?.trim().toLowerCase();
+    if (email) {
+      const user = await this.db.user.findUnique({ where: { email } });
+      if (user && !user.emailVerifiedAt) {
+        await this.db.verificationToken.updateMany({ where: { userId: user.id, purpose: "EMAIL_VERIFICATION", usedAt: null }, data: { usedAt: new Date() } });
+        const raw = randomBytes(32).toString("base64url");
+        await this.db.verificationToken.create({ data: { userId: user.id, tokenHash: tokenDigest(raw), purpose: "EMAIL_VERIFICATION", expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) } });
+        const link = (process.env.MANUFACTURER_APP_URL || "http://localhost:3000") + "/verify-email?token=" + encodeURIComponent(raw);
+        await sendPanEmail(email, "Your PAN email verification link", "<p><a href=\"" + link + "\">Verify your PAN email address</a></p><p>This link expires in 24 hours.</p>");
+      }
+    }
+    return { message: "If the address belongs to an unverified PAN account, a new verification link has been sent." };
+  }
+
+  @Post("v1/auth/forgot-password")
+  @Public()
+  async forgotPassword(@Body() body: { email?: string }) {
+    const email = body.email?.trim().toLowerCase();
+    if (email) {
+      const user = await this.db.user.findUnique({ where: { email } });
+      if (user && user.emailVerifiedAt) {
+        await this.db.verificationToken.updateMany({ where: { userId: user.id, purpose: "PASSWORD_RESET", usedAt: null }, data: { usedAt: new Date() } });
+        const raw = randomBytes(32).toString("base64url");
+        await this.db.verificationToken.create({ data: { userId: user.id, tokenHash: tokenDigest(raw), purpose: "PASSWORD_RESET", expiresAt: new Date(Date.now() + 60 * 60 * 1000) } });
+        const link = (process.env.MANUFACTURER_APP_URL || "http://localhost:3000") + "/reset-password?token=" + encodeURIComponent(raw);
+        await sendPanEmail(email, "Reset your PAN password", "<p>We received a request to reset your PAN password.</p><p><a href=\"" + link + "\">Choose a new password</a></p><p>This link expires in one hour. If you did not request this, you can ignore this email.</p>");
+        return { message: "If this address belongs to a PAN account, password reset instructions have been sent.", ...(process.env.NODE_ENV === "test" ? { testResetToken: raw } : {}) };
+      }
+    }
+    return { message: "If this address belongs to a PAN account, password reset instructions have been sent." };
+  }
+
+  @Post("v1/auth/reset-password")
+  @Public()
+  async resetPassword(@Body() body: { token?: string; password?: string }) {
+    if (!body.token || !body.password || body.password.length < 10) throw new BadRequestException("A valid reset token and a password of at least 10 characters are required.");
+    const token = await this.db.verificationToken.findUnique({ where: { tokenHash: tokenDigest(body.token) } });
+    if (!token || token.purpose !== "PASSWORD_RESET" || token.usedAt || token.expiresAt < new Date()) throw new BadRequestException("This password reset link is invalid or has expired.");
+    const passwordHash = await bcrypt.hash(body.password, 12);
+    await this.db.$transaction([
+      this.db.user.update({ where: { id: token.userId }, data: { passwordHash } }),
+      this.db.verificationToken.updateMany({ where: { userId: token.userId, purpose: "PASSWORD_RESET", usedAt: null }, data: { usedAt: new Date() } })
+    ]);
+    return { reset: true, message: "Your password has been changed. Sign in with your new password." };
   }
 
   @Post("v1/auth/login")
@@ -43,6 +110,7 @@ export class AppController {
     if (!email || !body.password) throw new BadRequestException("Email and password are required.");
     const user = await this.db.user.findUnique({ where: { email }, include: { memberships: { include: { manufacturer: true }, orderBy: { createdAt: "asc" }, take: 1 } } });
     if (!user || !(await bcrypt.compare(body.password, user.passwordHash))) throw new BadRequestException("Email or password is incorrect.");
+    if (!user.emailVerifiedAt) throw new ForbiddenException("Verify your email address before signing in. You can request a new verification link.");
     const membership = user.memberships[0];
     if (!membership) throw new BadRequestException("This account has no manufacturer workspace.");
     return this.session(user, membership.manufacturerId, membership.role);
