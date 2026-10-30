@@ -2,48 +2,60 @@
 
 ## Three user-facing products, one backend
 
-1. Manufacturer web portal (Next.js)
+1. Manufacturer web workspace (Next.js)
 2. Consumer mobile app (Expo / React Native, iOS and Android)
-3. Public verification web (Next.js, no sign-in required)
+3. Public verification website (Next.js, no sign-in required)
 
-The NestJS API is the shared platform backend, not a fourth user-facing app. PostgreSQL is the source of truth. Redis is provisioned for the asynchronous issuance/export stage.
+The NestJS API is shared platform infrastructure, not a fourth user-facing app. PostgreSQL is the source of truth.
 
-## Implemented MVP stack
+## Implemented platform stack
 
 - TypeScript monorepo: pnpm workspaces + Turborepo
-- Manufacturer web: Next.js App Router
+- Manufacturer workspace and super-admin console: Next.js App Router
 - Public verification: Next.js App Router
-- Consumer mobile: Expo / React Native with Expo Camera
+- Consumer mobile: Expo / React Native and Expo Camera
 - API: NestJS modular monolith
 - Data: PostgreSQL + Prisma
-- QR rendering: server-generated PNG data URLs
-- Auth: bcrypt password hashing + 12-hour JWT sessions
-- Local infrastructure: Docker Compose PostgreSQL and Redis
+- Background issuance: PostgreSQL-backed job table and API worker; no Redis dependency for the current MVP
+- Transactional email: SMTP adapter
+- Private documents: S3-compatible object storage with presigned uploads/downloads
+- Authentication: bcrypt password hashes, email verification, single-use password reset tokens, short-lived super-admin JWT
+- API protections: database membership revalidation, role checks, Helmet headers, CORS allow-list and request throttling
 
-## Current functional journey
+## Manufacturer and operations journey
 
-Manufacturer registers -> pending workspace -> sign-in -> product catalogue -> production batch -> per-unit identity issuance -> QR/CSV export -> public web or mobile verification.
+Producer registration -> email verification -> pending workspace -> company profile and facilities -> private document submission -> PAN review and approval -> product catalogue -> production batch -> Code Studio -> asynchronous carton and unit identity issuance -> QR artwork, CSV manifest and print-ready PDF -> public/mobile verification.
 
-Manufacturer approval is an operator-only API action guarded by a separate API key. Pending manufacturers' identities are explicitly returned as pending, not as verified. Full administrator accounts and review UI are a later stage.
+Company workspaces have Owner, Admin, Operator and Analyst roles. A separate super-admin console reviews producer workspaces and documents, manages identity state and handles privacy requests. Privileged actions require reasons and create audit records.
 
-## Trust boundaries
+## Identity hierarchy
 
-The API owns manufacturer permissions, product identities and verification decisions. Never expose service credentials, JWT signing secrets, token HMAC pepper or internal risk rules to clients. Enforce tenant isolation in API queries.
+- Individual unit: PANU-… code and its own QR token.
+- Outer carton: PANC-… code and its own QR token.
+- A carton identity links to the unit identities packed inside it. The system supports creating both levels together or creating carton codes later for previously issued, unassigned unit identities.
+- Batch quantity and carton configuration are checked before jobs are accepted. Issuance writes carton and unit identities transactionally.
+- Bearer URLs are encrypted at rest in the temporary export payload and are available for 48 hours to the job creator or workspace administrators.
 
-## Product identity
+Manufacturers remain responsible for applying each generated QR label to the correct physical packaging. PAN generates digital identity and print assets; it does not print, apply or inspect labels.
 
-Generate an opaque 256-bit random token. QR codes contain only a public verification URL with that token. Store a keyed HMAC-SHA256 digest for lookup; do not use sequential IDs or expose database keys. Manual product codes use 80 bits of random entropy. Issuance is persisted transactionally; large-scale async/idempotent job handling remains future work.
+## Trust boundaries and security
 
-Manufacturers generate and export QR assets; they arrange their own printing and packaging. PAN is not a label printer.
+The API owns producer permissions, product identities and verification decisions. Every authenticated API request rechecks that the user still belongs to the workspace and uses the current database role. Removing a user or changing their role therefore takes effect on the next request.
 
-## Verification
+QR tokens use 256 bits of cryptographically secure randomness. The identity table stores keyed HMAC digests, not raw tokens. Export payloads use AES-256-GCM encryption and expire after 48 hours. Private company documents use presigned S3 URLs, content-type and file-signature checks, and short expiry.
 
-Results include verified/no known issue, previously scanned, manufacturer review pending, under review, revoked, not recognised and temporarily unavailable. A network failure must never be described as proof of counterfeiting. A valid QR confirms an identity record, not physical contents, product quality or regulatory approval.
+## Verification semantics
 
-## Fraud signals and privacy
+A successful result means the code maps to an active identity issued under the named producer's PAN workspace. It does not independently prove that the physical object was made by that producer. QR codes can be copied. PAN does not test contents, quality, safety, packaging integrity or regulatory status.
 
-Repeated scans are not proof of counterfeiting. Future risk review may consider time, coarse location confidence, distinct devices, frequency and impossible travel patterns. GPS is optional, noisy and consent-based; never continuously track consumers. Nigerian NDPA review is required before processing precise location/device signals.
+Statuses distinguish active identity, previously scanned, producer pending, under review, revoked, not recognised and unavailable. A network failure is never presented as proof of counterfeiting. Regulatory identifiers supplied by a producer are clearly labelled as producer-provided and not verified by PAN.
 
-## Remaining platform domains
+## Privacy and operational boundaries
 
-Facilities, documents, multi-user invitations, admin review, audit logs, consumer reports, notifications, durable job queues, scan analytics, risk rules, object storage and regulator/ERP integrations remain planned.
+Public verification does not require a consumer account or precise location. The platform records the identity result and time, not continuous consumer location. A public privacy request form and super-admin request queue support access, correction, deletion, restriction and objection requests; identity verification is required before disclosure or action.
+
+The current privacy and terms pages are drafts. Before production, PAN must complete Nigerian data-protection/legal review, determine NDPA/NDPC registration and audit obligations, document retention and lawful bases, assess cross-border hosting and complete a DPIA where required.
+
+## Known production gaps
+
+Production hosting and secret management, SMTP and private S3 credentials, virus scanning of uploaded documents, full browser/device acceptance testing, independent penetration testing, disaster recovery and a formal incident-response process remain launch gates. The original manufacturer dashboard at / still contains illustrative demo data; the functional console is /portal.
