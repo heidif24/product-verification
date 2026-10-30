@@ -1,5 +1,5 @@
 "use client";
-import "../result.css";
+import "../../result.css";
 import { useEffect,useState } from "react";
 import { useParams } from "next/navigation";
 import { Fingerprint, ShieldCheck, AlertTriangle, Clock3, Info, ArrowLeft } from "lucide-react";
