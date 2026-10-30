@@ -30,3 +30,7 @@ CAC, NAFDAC and SON references submitted by a producer are displayed as producer
 See Getting started, API setup, system architecture, and security and privacy documentation.
 
 The current development branch is feat/pan-market-ready-operations. CI validates Prisma migrations, the API smoke journey, and TypeScript checks for the API, manufacturer portal, public verification website and consumer app. Production deployment, SMTP, private S3 storage, super-admin credentials, threat modelling and independent privacy/security review must be configured before public launch.
+
+## Production release
+
+See [Production readiness and release gates](docs/PRODUCTION-READINESS.md) for the required hosting, environment configuration, security, privacy, device testing and operational sign-off. Preview deployments and debug APKs are for testing, not public production use.
