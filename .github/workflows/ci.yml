@@ -45,7 +45,8 @@ jobs:
       - run: pnpm --filter @pan/api typecheck
       - name: Create isolated CI super-admin password hash
         run: |
-          pnpm --filter @pan/api exec node -e 'require("bcryptjs").hash("PAN-CI-SuperAdmin-2026!", 4).then(hash => require("fs").appendFileSync(process.env.GITHUB_ENV, "SUPER_ADMIN_PASSWORD_HASH=" + hash + "\\n"))'
+          HASH=$(pnpm --filter @pan/api exec node -e 'require("bcryptjs").hash("PAN-CI-SuperAdmin-2026!", 4).then(hash => process.stdout.write(hash))')
+          echo "SUPER_ADMIN_PASSWORD_HASH=$HASH" >> "$GITHUB_ENV"
       - run: pnpm --filter @pan/api db:deploy
       - name: Start PAN API
         run: pnpm --filter @pan/api dev > /tmp/pan-api.log 2>&1 &
