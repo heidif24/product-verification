@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "ts-node --project tsconfig.json src/main.ts",
     "build": "prisma generate && tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "typecheck": "prisma generate && tsc --noEmit",
@@ -33,7 +33,7 @@
     "@types/node": "^22.10.2",
     "@types/qrcode": "^1.5.5",
     "prisma": "6.3.1",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "ts-node": "^10.9.2"
   }
 }
