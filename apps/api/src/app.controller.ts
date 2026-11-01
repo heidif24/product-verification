@@ -127,11 +127,30 @@ export class AppController {
   async login(@Body() body: { email?: string; password?: string }) {
     const email = body.email?.trim().toLowerCase();
     if (!email || !body.password) throw new BadRequestException("Email and password are required.");
-    const user = await this.db.user.findUnique({ where: { email }, include: { memberships: { include: { manufacturer: true }, orderBy: { createdAt: "asc" }, take: 1 } } });
+    const user = await this.db.user.findUnique({ where: { email }, include: { memberships: { include: { manufacturer: true }, orderBy: { createdAt: "asc" } } } });
     if (!user || !(await bcrypt.compare(body.password, user.passwordHash))) throw new BadRequestException("Email or password is incorrect.");
     if (!user.emailVerifiedAt) throw new ForbiddenException("Verify your email address before signing in. You can request a new verification link.");
+    if (!user.memberships.length) throw new BadRequestException("This account has no manufacturer workspace.");
+    if (user.memberships.length > 1) return {
+      workspaceSelectionRequired: true,
+      user: { id: user.id, fullName: user.fullName, email: user.email },
+      workspaces: user.memberships.map(m => ({ id: m.manufacturerId, name: m.manufacturer.legalName, role: m.role }))
+    };
     const membership = user.memberships[0];
-    if (!membership) throw new BadRequestException("This account has no manufacturer workspace.");
+    return this.session(user, membership.manufacturerId, membership.role);
+  }
+
+  @Post("v1/auth/select-workspace")
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async selectWorkspace(@Body() body: { email?: string; password?: string; manufacturerId?: string }) {
+    const email = body.email?.trim().toLowerCase();
+    if (!email || !body.password || !body.manufacturerId) throw new BadRequestException("Email, password and workspace selection are required.");
+    const user = await this.db.user.findUnique({ where: { email } });
+    if (!user || !(await bcrypt.compare(body.password, user.passwordHash))) throw new BadRequestException("Email or password is incorrect.");
+    if (!user.emailVerifiedAt) throw new ForbiddenException("Verify your email address before signing in.");
+    const membership = await this.db.membership.findUnique({ where: { userId_manufacturerId: { userId: user.id, manufacturerId: body.manufacturerId } } });
+    if (!membership) throw new ForbiddenException("You do not have access to that manufacturer workspace.");
     return this.session(user, membership.manufacturerId, membership.role);
   }
 
