@@ -1,0 +1,16 @@
+appId: ng.pan.verify
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Ready to verify?"
+- tapOn: "Enter a product ID instead"
+- assertVisible: "Enter product ID"
+- tapOn:
+    text: "PAN-0123456789ABCDEF"
+- inputText: "${PAN_MOBILE_SMOKE_CODE}"
+- tapOn: "Verify product ID"
+- extendedWaitUntil:
+    visible: "PAN NETWORK RESULT"
+    timeout: 20000
+- assertVisible: "PAN Smoke Test Product"
+- assertVisible: "Manufacturer"

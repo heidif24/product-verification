@@ -1,5 +1,19 @@
-# PAN Public verification
+# PAN Public Verification
 
-Planned mobile-first Next.js public verification experience. QR URLs open in any ordinary browser without requiring an app install or account.
+Next.js mobile-first public verification website. No account or app installation is required.
 
-The page will display plain-language identity status and safe product information returned by the public API. It will never expose raw tokens, private manufacturer information or internal risk rules.
+## Routes
+
+- `/` — scan instructions and manual PAN product-ID entry.
+- `/v/[token]` — QR token verification result.
+- `/code/[code]` — manual product-code verification result.
+
+Run the API and PostgreSQL service as described in [Getting started](../../docs/GETTING-STARTED.md), then run:
+
+```bash
+pnpm --filter @pan/verification-web dev
+```
+
+The site calls the shared PAN API. Set `NEXT_PUBLIC_PAN_API_URL` in the deployment environment when the API is not at the local development address.
+
+PAN verifies a digital identity record. It does not independently test physical contents, product quality or regulator approval.

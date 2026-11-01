@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pan
+      POSTGRES_PASSWORD: pan_local_password
+      POSTGRES_DB: pan
+    ports:
+      - "5432:5432"
+    volumes:
+      - pan_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pan -d pan"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - pan_redis:/data
+volumes:
+  pan_postgres:
+  pan_redis:
