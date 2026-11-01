@@ -302,16 +302,19 @@ export class ManufacturerOperationsController {
     if (cartonQuantity > 0 && !batch.unitsPerCarton) throw new BadRequestException("Configure units per carton on the production batch before issuing carton identities.");
     if (cartonQuantity > 0 && unitQuantity > 0 && unitQuantity !== cartonQuantity * batch.unitsPerCarton!) throw new BadRequestException("When issuing new units and cartons together, unit quantity must equal cartons multiplied by units per carton.");
     return this.db.$transaction(async tx => {
-      const [currentUnits, currentCartons, pending] = await Promise.all([
+      const [currentUnits, currentCartons, pending, pendingCartonOnly] = await Promise.all([
         tx.productIdentity.count({ where: { batchId: id, level: "UNIT" } }),
         tx.productIdentity.count({ where: { batchId: id, level: "CARTON" } }),
-        tx.issuanceJob.aggregate({ where: { batchId: id, status: { in: ["QUEUED", "PROCESSING"] } }, _sum: { unitQuantity: true, cartonQuantity: true } })
+        tx.issuanceJob.aggregate({ where: { batchId: id, status: { in: ["QUEUED", "PROCESSING"] } }, _sum: { unitQuantity: true, cartonQuantity: true } }),
+        tx.issuanceJob.aggregate({ where: { batchId: id, status: { in: ["QUEUED", "PROCESSING"] }, unitQuantity: 0, cartonQuantity: { gt: 0 } }, _sum: { cartonQuantity: true } })
       ]);
       if (currentUnits + (pending._sum.unitQuantity || 0) + unitQuantity > batch.quantity) throw new BadRequestException("The requested unit identities exceed the production quantity remaining, including queued jobs.");
       if (cartonQuantity > 0 && (batch.cartonCount === null || currentCartons + (pending._sum.cartonQuantity || 0) + cartonQuantity > batch.cartonCount)) throw new BadRequestException("The requested carton identities exceed the number of cartons recorded for this batch.");
       if (cartonQuantity > 0 && unitQuantity === 0) {
         const unassignedUnits = await tx.productIdentity.count({ where: { batchId: id, level: "UNIT", parentId: null } });
-        if (unassignedUnits < cartonQuantity * batch.unitsPerCarton!) throw new BadRequestException("There are not enough unassigned individual-unit identities to fill these cartons. Issue the unit identities first, then create the carton codes.");
+        const unitsReservedByPendingCartons = (pendingCartonOnly._sum.cartonQuantity || 0) * batch.unitsPerCarton!;
+        const unitsRequired = unitsReservedByPendingCartons + cartonQuantity * batch.unitsPerCarton!;
+        if (unassignedUnits < unitsRequired) throw new BadRequestException("There are not enough unassigned individual-unit identities remaining after accounting for queued carton jobs. Wait for pending carton jobs to finish or issue more unit identities.");
       }
       return tx.issuanceJob.create({ data: { manufacturerId: req.user.manufacturerId, batchId: id, createdById: req.user.sub, unitQuantity, cartonQuantity } });
     }, { isolationLevel: "Serializable" });
