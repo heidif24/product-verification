@@ -267,6 +267,8 @@ export class AppController {
   @UseGuards(AuthGuard)
   async issue(@Req() req: AuthRequest, @Param("id") id: string, @Body() body: { quantity?: number }) {
     await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR"]);
+    const producer = await this.db.manufacturer.findUnique({ where: { id: req.user.manufacturerId }, select: { status: true } });
+    if (producer?.status !== "APPROVED") throw new ForbiddenException("Your PAN producer workspace must be approved before issuing product identities.");
     const batch = await this.db.batch.findFirst({ where: { id, product: { manufacturerId: req.user.manufacturerId } }, include: { product: true } });
     if (!batch) throw new NotFoundException("Batch not found");
     const quantity = Number(body.quantity);
