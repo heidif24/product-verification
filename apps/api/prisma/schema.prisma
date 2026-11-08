@@ -28,9 +28,15 @@ enum ProductStatus {
 enum IdentityStatus {
   GENERATED
   EXPORTED
+  PRINTED
+  QUALITY_CHECKED
   ACTIVE
   QUARANTINED
   REVOKED
+  RECALLED
+  BLOCKED
+  DESTROYED
+  CANCELLED
 }
 enum IdentityLevel {
   UNIT
@@ -215,7 +221,7 @@ model ProductIdentity {
   issuanceJobId     String?
   level             IdentityLevel  @default(UNIT)
   parentId          String?
-  status            IdentityStatus @default(ACTIVE)
+  status            IdentityStatus @default(GENERATED)
   verificationCount Int            @default(0)
   firstVerifiedAt   DateTime?
   lastVerifiedAt    DateTime?
