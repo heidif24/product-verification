@@ -8,6 +8,7 @@ import { PrismaService } from "./prisma.service";
 import { IssuanceWorker } from "./issuance.worker";
 import { ManufacturerOperationsController, SuperAdminAuthController, SuperAdminController, SuperAdminGuard } from "./operations.controller";
 import { ConsumerReportController, PrivacyRequestController } from "./reports.controller";
+import { PAYMENT_PROVIDER, PaystackPaymentProvider } from "./payments.service";
 
 @Module({
   imports: [
@@ -16,7 +17,8 @@ import { ConsumerReportController, PrivacyRequestController } from "./reports.co
   ],
   controllers: [AppController, ManufacturerOperationsController, SuperAdminAuthController, SuperAdminController, ConsumerReportController, PrivacyRequestController],
   providers: [
-    PrismaService, IssuanceWorker, SuperAdminGuard,
+    PrismaService, IssuanceWorker, SuperAdminGuard, PaystackPaymentProvider,
+    { provide: PAYMENT_PROVIDER, useExisting: PaystackPaymentProvider },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: ThrottlerGuard }
   ]

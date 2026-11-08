@@ -1,0 +1,2 @@
+ALTER TYPE "IdentityStatus" ADD VALUE 'GENERATED';
+ALTER TYPE "IdentityStatus" ADD VALUE 'EXPORTED';

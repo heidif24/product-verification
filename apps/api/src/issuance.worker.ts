@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { createCipheriv, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { PrismaService } from "./prisma.service";
+import { appendAudit } from "./audit";
 import * as QRCode from "qrcode";
 
 type ExportAsset = { code: string; level: "UNIT" | "CARTON"; verifyUrl: string; parentCode: string | null };
@@ -51,13 +52,13 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
       }
       const existingUnitsToLink = job.cartonQuantity > 0 && job.unitQuantity === 0 ? await this.db.productIdentity.findMany({ where: { batchId: job.batchId, level: "UNIT", parentId: null }, select: { id: true }, orderBy: { issuedAt: "asc" }, take: job.cartonQuantity * (job.batch.unitsPerCarton || 0) }) : [];
       if (job.cartonQuantity > 0 && job.unitQuantity === 0 && existingUnitsToLink.length !== job.cartonQuantity * (job.batch.unitsPerCarton || 0)) throw new Error("Not enough unassigned unit identities remain for carton linking.");
-      const unitRecords: Array<{ batchId: string; publicCode: string; tokenHash: string; level: "UNIT"; parentId: string | null }> = [];
+      const unitRecords: Array<{ batchId: string; publicCode: string; tokenHash: string; issuanceJobId: string; level: "UNIT"; parentId: string | null }> = [];
       const unitAssets: ExportAsset[] = [];
       for (let i = 0; i < job.unitQuantity; i++) {
         const token = randomBytes(32).toString("base64url"), code = "PANU-" + randomBytes(10).toString("hex").toUpperCase();
         const cartonIndex = job.cartonQuantity > 0 ? Math.floor(i / Math.max(1, job.batch.unitsPerCarton || 1)) : -1;
         const carton = cartonIndex >= 0 ? cartons[Math.min(cartonIndex, cartons.length - 1)] : undefined;
-        unitRecords.push({ batchId: job.batchId, publicCode: code, tokenHash: digest(token), level: "UNIT", parentId: carton?.id || null });
+        unitRecords.push({ batchId: job.batchId, publicCode: code, tokenHash: digest(token), issuanceJobId: jobId, level: "UNIT", parentId: carton?.id || null });
         unitAssets.push({ code, level: "UNIT", verifyUrl: baseUrl + "/v/" + token, parentCode: carton?.code || null });
       }
       await this.db.issuanceJob.update({ where: { id: jobId }, data: { progress: 25 } });
@@ -65,7 +66,7 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
       const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
       const ciphertext = encrypt({ assets, product: job.batch.product.name, batchCode: job.batch.batchCode, expiresAt: expiresAt.toISOString() });
       await this.db.$transaction(async tx => {
-        if (cartons.length) await tx.productIdentity.createMany({ data: cartons.map(c => ({ id: c.id, batchId: job.batchId, publicCode: c.code, tokenHash: digest(c.token), level: "CARTON" })) });
+        if (cartons.length) await tx.productIdentity.createMany({ data: cartons.map(c => ({ id: c.id, batchId: job.batchId, publicCode: c.code, tokenHash: digest(c.token), issuanceJobId: jobId, level: "CARTON" })) });
         for (let offset = 0; offset < unitRecords.length; offset += 1000) await tx.productIdentity.createMany({ data: unitRecords.slice(offset, offset + 1000) });
         if (existingUnitsToLink.length) {
           const perCarton = job.batch.unitsPerCarton || 0;
@@ -79,7 +80,14 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
       }, { timeout: 120000 });
     } catch (error) {
       this.logger.error("Issuance job failed: " + jobId, error instanceof Error ? error.stack : String(error));
-      await this.db.issuanceJob.update({ where: { id: jobId }, data: { status: "FAILED", errorMessage: "Issuance could not be completed. Contact PAN support with the job reference." } }).catch(() => undefined);
+      const job = await this.db.issuanceJob.findUnique({ where: { id: jobId }, select: { id: true, manufacturerId: true, createdById: true, unitQuantity: true, cartonQuantity: true } });
+      if (job) await this.db.$transaction(async tx => {
+        const failed = await tx.issuanceJob.updateMany({ where: { id: jobId, status: "PROCESSING" }, data: { status: "FAILED", errorMessage: "Issuance could not be completed. Contact PAN support with the job reference." } });
+        if (!failed.count) return;
+        const refundCredits = job.unitQuantity + job.cartonQuantity;
+        await tx.walletEntry.create({ data: { manufacturerId: job.manufacturerId, amountCredits: refundCredits, type: "ISSUANCE_REFUND", idempotencyKey: "issuance-refund:" + jobId, actorId: "PAN_SYSTEM", reason: `${refundCredits} credits refunded for failed issuance job ${jobId}.` } });
+        await appendAudit(tx, { actor: "PAN_SYSTEM", action: "ISSUANCE_CREDITS_REFUNDED", targetType: "ISSUANCE_JOB", targetId: jobId, reason: `${refundCredits} credits returned after issuance failure.`, metadata: { refundCredits, status: "FAILED" } });
+      }).catch(refundError => this.logger.error("Could not finalize issuance failure refund: " + jobId, refundError instanceof Error ? refundError.stack : String(refundError)));
     }
   }
 }

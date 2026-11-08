@@ -1,15 +1,17 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards, BadRequestException, NotFoundException, ConflictException, ForbiddenException, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Req, Headers, UseGuards, BadRequestException, NotFoundException, ConflictException, ForbiddenException } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { Throttle } from "@nestjs/throttler";
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import * as bcrypt from "bcryptjs";
 import * as QRCode from "qrcode";
 import { PrismaService } from "./prisma.service";
 import { AuthGuard, AuthRequest, Public } from "./auth";
 import { sendPanEmail } from "./mailer";
+import { appendAudit } from "./audit";
 
 const slugify = (value: string) => value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
 const tokenDigest = (token: string) => createHmac("sha256", process.env.TOKEN_PEPPER!).update(token).digest("hex");
+const scanSessionDigest = (sessionId?: string) => sessionId && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(sessionId) ? createHmac("sha256", process.env.TOKEN_PEPPER!).update("scan-session:" + sessionId).digest("hex") : null;
 
 @Controller()
 export class AppController {
@@ -19,6 +21,40 @@ export class AppController {
     const membership = await this.db.membership.findUnique({ where: { userId_manufacturerId: { userId: req.user.sub, manufacturerId: req.user.manufacturerId } } });
     if (!membership || !allowed.includes(membership.role)) throw new ForbiddenException("Your workspace role does not permit this action.");
     return membership;
+  }
+
+  private async recordIdentityScan(identityId: string, initialOutcome: string, sessionId: string | undefined, now: Date, currentCount: number) {
+    const sessionHash = scanSessionDigest(sessionId);
+    const sessionDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    return this.db.$transaction(async tx => {
+      let independent = true;
+      if (sessionHash) {
+        const inserted = await tx.scanSession.createMany({ data: { identityId, sessionHash, sessionDate }, skipDuplicates: true });
+        independent = inserted.count === 1;
+      }
+
+      let firstScan = false;
+      let scansRecorded = currentCount;
+      if (independent) {
+        if (initialOutcome === "VERIFIED") {
+          const claimedFirst = await tx.productIdentity.updateMany({ where: { id: identityId, firstVerifiedAt: null }, data: { verificationCount: { increment: 1 }, firstVerifiedAt: now, lastVerifiedAt: now } });
+          firstScan = claimedFirst.count === 1;
+          if (!firstScan) await tx.productIdentity.update({ where: { id: identityId }, data: { verificationCount: { increment: 1 }, lastVerifiedAt: now } });
+        } else {
+          await tx.productIdentity.update({ where: { id: identityId }, data: { verificationCount: { increment: 1 }, lastVerifiedAt: now } });
+        }
+        const updated = await tx.productIdentity.findUnique({ where: { id: identityId }, select: { verificationCount: true } });
+        scansRecorded = updated?.verificationCount ?? currentCount + 1;
+      }
+
+      const sessionCount = sessionHash ? await tx.scanSession.count({ where: { identityId, sessionDate } }) : 0;
+      let outcome = initialOutcome;
+      if ((initialOutcome === "VERIFIED" || initialOutcome === "PREVIOUSLY_SCANNED") && !independent) outcome = "VERIFIED";
+      else if (initialOutcome === "VERIFIED" && !firstScan) outcome = "PREVIOUSLY_SCANNED";
+      if ((outcome === "VERIFIED" || outcome === "PREVIOUSLY_SCANNED") && sessionCount >= 10) outcome = "SUSPICIOUS_ACTIVITY";
+      await tx.verificationEvent.create({ data: { identityId, outcome, sessionHash, sessionDate, isIndependent: independent, riskLevel: outcome === "SUSPICIOUS_ACTIVITY" && independent ? "HIGH" : "NORMAL" } });
+      return { outcome, independent, duplicate: !independent, scansRecorded, sessionCount };
+    });
   }
 
   @Get("health")
@@ -37,7 +73,7 @@ export class AppController {
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async register(@Body() body: { fullName?: string; email?: string; password?: string; companyName?: string }) {
     const fullName = body.fullName?.trim(), email = body.email?.trim().toLowerCase(), password = body.password ?? "", companyName = body.companyName?.trim();
-    if (!fullName || !email || !companyName || password.length < 10) throw new BadRequestException("Enter your name, company, valid email and a password of at least 10 characters.");
+    if (!fullName || !email || !companyName || password.length < 10 || Buffer.byteLength(password, "utf8") > 72) throw new BadRequestException("Enter your name, company, valid email and a password between 10 characters and 72 UTF-8 bytes.");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new BadRequestException("Enter a valid email address.");
     if (await this.db.user.findUnique({ where: { email } })) throw new ConflictException("An account with this email already exists.");
     const base = slugify(companyName) || "manufacturer";
@@ -110,14 +146,16 @@ export class AppController {
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async resetPassword(@Body() body: { token?: string; password?: string }) {
-    if (!body.token || !body.password || body.password.length < 10) throw new BadRequestException("A valid reset token and a password of at least 10 characters are required.");
+    if (!body.token || !body.password || body.password.length < 10 || Buffer.byteLength(body.password, "utf8") > 72) throw new BadRequestException("A valid reset token and a password between 10 characters and 72 UTF-8 bytes are required.");
     const token = await this.db.verificationToken.findUnique({ where: { tokenHash: tokenDigest(body.token) } });
     if (!token || token.purpose !== "PASSWORD_RESET" || token.usedAt || token.expiresAt < new Date()) throw new BadRequestException("This password reset link is invalid or has expired.");
     const passwordHash = await bcrypt.hash(body.password, 12);
-    await this.db.$transaction([
-      this.db.user.update({ where: { id: token.userId }, data: { passwordHash, tokenVersion: { increment: 1 } } }),
-      this.db.verificationToken.updateMany({ where: { userId: token.userId, purpose: "PASSWORD_RESET", usedAt: null }, data: { usedAt: new Date() } })
-    ]);
+    const now = new Date();
+    await this.db.$transaction(async tx => {
+      const consumed = await tx.verificationToken.updateMany({ where: { id: token.id, purpose: "PASSWORD_RESET", usedAt: null, expiresAt: { gt: now } }, data: { usedAt: now } });
+      if (!consumed.count) throw new BadRequestException("This password reset link is invalid or has expired.");
+      await tx.user.update({ where: { id: token.userId }, data: { passwordHash, tokenVersion: { increment: 1 } } });
+    });
     return { reset: true, message: "Your password has been changed. Sign in with your new password." };
   }
 
@@ -159,63 +197,10 @@ export class AppController {
     return { accessToken, user: { id: user.id, fullName: user.fullName, email: user.email }, workspace: { id: manufacturerId, role } };
   }
 
-  private assertAdmin(req: AuthRequest) {
-    const provided = req.headers["x-pan-admin-key"];
-    const expected = process.env.ADMIN_API_KEY || "";
-    if (typeof provided !== "string" || !expected || provided.length !== expected.length || !timingSafeEqual(Buffer.from(provided), Buffer.from(expected))) {
-      throw new ForbiddenException("Administrator credentials are invalid.");
-    }
-  }
-
-  @Get("v1/admin/manufacturers")
-  @Public()
-  async adminManufacturers(@Req() req: AuthRequest, @Query("status") status = "PENDING") {
-    this.assertAdmin(req);
-    const allowed = ["PENDING", "APPROVED", "SUSPENDED"];
-    if (!allowed.includes(status)) throw new BadRequestException("Unknown manufacturer status.");
-    return this.db.manufacturer.findMany({ where: { status: status as any }, include: { _count: { select: { products: true, memberships: true } } }, orderBy: { createdAt: "asc" } });
-  }
-
-  @Post("v1/admin/manufacturers/:id/approve")
-  @Public()
-  async approveManufacturer(@Req() req: AuthRequest, @Param("id") id: string, @Body() body: { reason?: string }) {
-    this.assertAdmin(req);
-    const reason = body.reason?.trim();
-    if (!reason || reason.length < 10) throw new BadRequestException("Record a review reason of at least 10 characters.");
-    return this.db.$transaction(async tx => {
-      const manufacturer = await tx.manufacturer.update({ where: { id }, data: { status: "APPROVED" }, select: { id: true, legalName: true, status: true, updatedAt: true } });
-      await tx.auditLog.create({ data: { actor: "PAN_ADMIN", action: "MANUFACTURER_APPROVED", targetType: "MANUFACTURER", targetId: id, reason } });
-      return manufacturer;
-    });
-  }
-
-  @Post("v1/admin/identities/:id/:action")
-  @Public()
-  async updateIdentityStatus(@Req() req: AuthRequest, @Param("id") id: string, @Param("action") action: string, @Body() body: { reason?: string }) {
-    this.assertAdmin(req);
-    const states: Record<string, "ACTIVE" | "QUARANTINED" | "REVOKED"> = { release: "ACTIVE", quarantine: "QUARANTINED", revoke: "REVOKED" };
-    const status = states[action];
-    const reason = body.reason?.trim();
-    if (!status) throw new BadRequestException("Action must be release, quarantine or revoke.");
-    if (!reason || reason.length < 10) throw new BadRequestException("Record a reason of at least 10 characters.");
-    return this.db.$transaction(async tx => {
-      const identity = await tx.productIdentity.update({ where: { id }, data: { status }, select: { id: true, publicCode: true, status: true, batchId: true } });
-      await tx.auditLog.create({ data: { actor: "PAN_ADMIN", action: "IDENTITY_" + action.toUpperCase(), targetType: "PRODUCT_IDENTITY", targetId: id, reason } });
-      return identity;
-    });
-  }
-
-  @Get("v1/admin/audit")
-  @Public()
-  async adminAudit(@Req() req: AuthRequest) {
-    this.assertAdmin(req);
-    return this.db.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: 100 });
-  }
-
   @Get("v1/manufacturer/me")
   @UseGuards(AuthGuard)
   async me(@Req() req: AuthRequest) {
-    await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR", "ANALYST"]);
+    await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR", "ANALYST", "FINANCE", "SUPPORT"]);
     const manufacturer = await this.db.manufacturer.findUnique({ where: { id: req.user.manufacturerId }, include: { _count: { select: { products: true, memberships: true } } } });
     if (!manufacturer) throw new NotFoundException("Workspace not found");
     return { ...manufacturer, counts: manufacturer._count };
@@ -223,7 +208,7 @@ export class AppController {
 
   @Get("v1/analytics/overview")
   async analytics(@Req() req: AuthRequest) {
-    await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR", "ANALYST"]);
+    await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR", "ANALYST", "FINANCE", "SUPPORT"]);
     const manufacturerId = req.user.manufacturerId;
     const identityWhere = { batch: { product: { manufacturerId } } };
     const [products, batches, identities, scans, recent] = await Promise.all([
@@ -239,7 +224,7 @@ export class AppController {
   @Get("v1/products")
   @UseGuards(AuthGuard)
   async products(@Req() req: AuthRequest) {
-    await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR", "ANALYST"]);
+    await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR", "ANALYST", "FINANCE", "SUPPORT"]);
     return this.db.product.findMany({ where: { manufacturerId: req.user.manufacturerId }, include: { _count: { select: { batches: true } }, batches: { select: { _count: { select: { identities: true } } } } }, orderBy: { createdAt: "desc" } });
   }
 
@@ -249,13 +234,17 @@ export class AppController {
     await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR"]);
     const name = body.name?.trim();
     if (!name) throw new BadRequestException("Product name is required.");
-    return this.db.product.create({ data: { manufacturerId: req.user.manufacturerId, name, brand: body.brand?.trim() || null, category: body.category?.trim() || null, description: body.description?.trim() || null, nafdacRegistrationNumber: body.nafdacRegistrationNumber?.trim() || null, sonCertificateNumber: body.sonCertificateNumber?.trim() || null } });
+    return this.db.$transaction(async tx => {
+      const product = await tx.product.create({ data: { manufacturerId: req.user.manufacturerId, name, brand: body.brand?.trim() || null, category: body.category?.trim() || null, description: body.description?.trim() || null, nafdacRegistrationNumber: body.nafdacRegistrationNumber?.trim() || null, sonCertificateNumber: body.sonCertificateNumber?.trim() || null } });
+      await appendAudit(tx, { actor: req.user.sub, action: "PRODUCT_CREATED", targetType: "PRODUCT", targetId: product.id, reason: "Manufacturer created a product record.", metadata: { productName: product.name, category: product.category } });
+      return product;
+    });
   }
 
   @Get("v1/products/:id/batches")
   @UseGuards(AuthGuard)
   async batches(@Req() req: AuthRequest, @Param("id") id: string) {
-    await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR", "ANALYST"]);
+    await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR", "ANALYST", "FINANCE", "SUPPORT"]);
     const product = await this.db.product.findFirst({ where: { id, manufacturerId: req.user.manufacturerId } });
     if (!product) throw new NotFoundException("Product not found");
     return this.db.batch.findMany({ where: { productId: id }, include: { _count: { select: { identities: true } } }, orderBy: { createdAt: "desc" } });
@@ -275,7 +264,11 @@ export class AppController {
     const unitsPerCarton = body.unitsPerCarton === undefined || body.unitsPerCarton === null ? null : Number(body.unitsPerCarton);
     if ((cartonCount === null) !== (unitsPerCarton === null) || (cartonCount !== null && (!Number.isInteger(cartonCount) || cartonCount < 1 || !Number.isInteger(unitsPerCarton) || unitsPerCarton! < 1 || cartonCount * unitsPerCarton! !== quantity))) throw new BadRequestException("Carton count and units per carton must both be provided, and their product must equal the production quantity.");
     try {
-      return await this.db.batch.create({ data: { productId: id, batchCode, quantity, cartonCount, unitsPerCarton, productionDate: body.productionDate ? new Date(body.productionDate) : null, expiryDate: body.expiryDate ? new Date(body.expiryDate) : null } });
+      return await this.db.$transaction(async tx => {
+        const batch = await tx.batch.create({ data: { productId: id, batchCode, quantity, cartonCount, unitsPerCarton, productionDate: body.productionDate ? new Date(body.productionDate) : null, expiryDate: body.expiryDate ? new Date(body.expiryDate) : null } });
+        await appendAudit(tx, { actor: req.user.sub, action: "BATCH_CREATED", targetType: "BATCH", targetId: batch.id, reason: "Manufacturer created a production batch.", metadata: { productId: id, batchCode, quantity, cartonCount, unitsPerCarton } });
+        return batch;
+      });
     } catch (error: any) {
       if (error?.code === "P2002") throw new ConflictException("That batch reference already exists for this product.");
       throw error;
@@ -309,7 +302,12 @@ export class AppController {
       if (alreadyIssued + quantity > batch.quantity) {
         throw new BadRequestException(`This batch contains ${batch.quantity} units; ${alreadyIssued} identities have already been issued.`);
       }
-      return tx.productIdentity.createMany({ data: records.map(r => ({ batchId: id, publicCode: r.publicCode, tokenHash: r.tokenHash })) });
+      const wallet = await tx.walletEntry.aggregate({ where: { manufacturerId: req.user.manufacturerId }, _sum: { amountCredits: true } });
+      if ((wallet._sum.amountCredits || 0) < quantity) throw new BadRequestException(`Insufficient code credits. ${quantity} credits are required for this issuance.`);
+      const result = await tx.productIdentity.createMany({ data: records.map(r => ({ batchId: id, publicCode: r.publicCode, tokenHash: r.tokenHash, status: "EXPORTED" })) });
+      await tx.walletEntry.create({ data: { manufacturerId: req.user.manufacturerId, amountCredits: -quantity, type: "ISSUANCE_DEBIT", idempotencyKey: "direct-issuance:" + randomBytes(18).toString("hex"), actorId: req.user.sub, reason: `${quantity} credits charged for direct identity export.` } });
+      await appendAudit(tx, { actor: req.user.sub, action: "DIRECT_IDENTITY_EXPORT", targetType: "BATCH", targetId: id, reason: `${quantity} identities exported and ${quantity} credits charged.` });
+      return result;
     }, { isolationLevel: "Serializable" });
     return { issued: created.count, batch: { id: batch.id, batchCode: batch.batchCode }, product: { name: batch.product.name, brand: batch.product.brand }, identities: assets, notice: "Each QR identity is unique. Keep this export secure: verification URLs contain bearer tokens." };
   }
@@ -317,15 +315,16 @@ export class AppController {
   @Get("v1/verify/code/:code")
   @Public()
   @Throttle({ default: { limit: 60, ttl: 60000 } })
-  async verifyCode(@Param("code") code: string) {
+  async verifyCode(@Param("code") code: string, @Headers("x-pan-scan-session") scanSession?: string) {
     const identity = await this.db.productIdentity.findUnique({ where: { publicCode: code.trim().toUpperCase() }, include: { batch: { include: { product: { include: { manufacturer: true } } } }, carton: { select: { publicCode: true } }, _count: { select: { containedUnits: true } } } });
     if (!identity) throw new NotFoundException("This product ID is not recognised.");
     const now = new Date();
-    const outcome = identity.status === "REVOKED" ? "REVOKED" : identity.status === "QUARANTINED" ? "UNDER_REVIEW" : identity.batch.product.manufacturer.status !== "APPROVED" ? "MANUFACTURER_PENDING" : identity.batch.expiryDate && identity.batch.expiryDate < now ? "EXPIRED" : identity.firstVerifiedAt !== null ? "PREVIOUSLY_SCANNED" : "VERIFIED";
-    await this.db.$transaction([
-      this.db.productIdentity.update({ where: { id: identity.id }, data: { verificationCount: { increment: 1 }, firstVerifiedAt: outcome === "VERIFIED" ? now : identity.firstVerifiedAt, lastVerifiedAt: now } }),
-      this.db.verificationEvent.create({ data: { identityId: identity.id, outcome: "MANUAL_" + outcome } })
-    ]);
+    const initialOutcome = identity.status === "REVOKED" ? "REVOKED" : identity.status === "QUARANTINED" ? "UNDER_REVIEW" : identity.batch.product.manufacturer.status !== "APPROVED" ? "MANUFACTURER_PENDING" : identity.status !== "ACTIVE" ? "NOT_ACTIVATED" : identity.batch.expiryDate && identity.batch.expiryDate < now ? "EXPIRED" : identity.firstVerifiedAt !== null ? "PREVIOUSLY_SCANNED" : "VERIFIED";
+    const scan = await this.recordIdentityScan(identity.id, initialOutcome, scanSession, now, identity.verificationCount);
+    const outcome = scan.outcome;
+    if (outcome === "NOT_ACTIVATED") return { status: outcome, title: "Product identifier not yet activated", message: "This product identifier exists but has not yet been activated for public verification.", duplicateScan: scan.duplicate, scansRecorded: scan.scansRecorded };
+    if (outcome === "SUSPICIOUS_ACTIVITY") return { status: outcome, title: "Unusual verification activity", message: "This identity has been checked from many independent sessions in a short period. This pattern is not proof of counterfeiting; inspect the product and report concerns.", scansRecorded: scan.scansRecorded };
+    if (scan.duplicate && (outcome === "VERIFIED" || outcome === "PREVIOUSLY_SCANNED")) return { status: "VERIFIED", title: "Already checked in this session", message: "This identity was already checked in this browser session. Refreshes do not count as additional independent scans.", duplicateScan: true, scansRecorded: scan.scansRecorded };
     const batch = identity.batch; const product = batch.product;
     return { status: outcome, title: outcome === "VERIFIED" ? "PAN identity matched" : outcome === "PREVIOUSLY_SCANNED" ? "This identity has been scanned before" : outcome === "UNDER_REVIEW" ? "Product under review" : outcome === "MANUFACTURER_PENDING" ? "Manufacturer review pending" : outcome === "EXPIRED" ? "Recorded expiry date has passed" : "Identity revoked", message: outcome === "EXPIRED" ? "The producer batch record shows that this product has passed its recorded expiry date. Do not use or consume it; check the packaging and contact the producer." : outcome === "VERIFIED" ? "This code matches an active identity issued under the named producer’s PAN workspace. It indicates that the code was issued under this producer account; it does not independently prove the physical item was made by that producer or validate its contents, quality or regulatory status." : outcome === "PREVIOUSLY_SCANNED" ? "This code has been checked before. This is not proof of counterfeiting; compare the product details and contact the manufacturer if anything looks unusual." : outcome === "UNDER_REVIEW" ? "This identity is temporarily under review. Contact the manufacturer before relying on this product." : outcome === "MANUFACTURER_PENDING" ? "This code matches an identity record, but the manufacturer has not yet completed PAN approval. This is not a PAN endorsement of the product." : "This identity is no longer active in the PAN network.", product: { name: product.name, brand: product.brand, category: product.category, manufacturer: product.manufacturer.legalName, batchCode: batch.batchCode, productionDate: batch.productionDate, expiryDate: batch.expiryDate, packaging: { identityLevel: identity.level, cartonCode: identity.carton?.publicCode ?? null, containedUnitCount: identity.level === "CARTON" ? identity._count.containedUnits : null }, regulatoryReferences: { nafdacRegistrationNumber: product.nafdacRegistrationNumber, sonCertificateNumber: product.sonCertificateNumber, source: "PRODUCER_PROVIDED_NOT_VERIFIED_BY_PAN" } }, checkedAt: now.toISOString(), scansRecorded: identity.verificationCount + 1 };
   }
@@ -333,7 +332,7 @@ export class AppController {
   @Get("v1/verify/:token")
   @Public()
   @Throttle({ default: { limit: 60, ttl: 60000 } })
-  async verify(@Param("token") token: string) {
+  async verify(@Param("token") token: string, @Headers("x-pan-scan-session") scanSession?: string) {
     if (!/^[A-Za-z0-9_-]{30,60}$/.test(token)) throw new NotFoundException("This product identity is not recognised.");
     const identity = await this.db.productIdentity.findUnique({ where: { tokenHash: tokenDigest(token) }, include: { batch: { include: { product: { include: { manufacturer: true } } } }, carton: { select: { publicCode: true } }, _count: { select: { containedUnits: true } } } });
     if (!identity) {
@@ -341,11 +340,12 @@ export class AppController {
       return { status: "NOT_RECOGNISED", title: "Identity not recognised", message: "We could not find this code in the PAN network. Check that you scanned the code on the product itself." };
     }
     const now = new Date();
-    const outcome = identity.status === "REVOKED" ? "REVOKED" : identity.status === "QUARANTINED" ? "UNDER_REVIEW" : identity.batch.product.manufacturer.status !== "APPROVED" ? "MANUFACTURER_PENDING" : identity.batch.expiryDate && identity.batch.expiryDate < now ? "EXPIRED" : identity.firstVerifiedAt !== null ? "PREVIOUSLY_SCANNED" : "VERIFIED";
-    await this.db.$transaction([
-      this.db.productIdentity.update({ where: { id: identity.id }, data: { verificationCount: { increment: 1 }, firstVerifiedAt: outcome === "VERIFIED" ? now : identity.firstVerifiedAt, lastVerifiedAt: now } }),
-      this.db.verificationEvent.create({ data: { identityId: identity.id, outcome } })
-    ]);
+    const initialOutcome = identity.status === "REVOKED" ? "REVOKED" : identity.status === "QUARANTINED" ? "UNDER_REVIEW" : identity.batch.product.manufacturer.status !== "APPROVED" ? "MANUFACTURER_PENDING" : identity.status !== "ACTIVE" ? "NOT_ACTIVATED" : identity.batch.expiryDate && identity.batch.expiryDate < now ? "EXPIRED" : identity.firstVerifiedAt !== null ? "PREVIOUSLY_SCANNED" : "VERIFIED";
+    const scan = await this.recordIdentityScan(identity.id, initialOutcome, scanSession, now, identity.verificationCount);
+    const outcome = scan.outcome;
+    if (outcome === "NOT_ACTIVATED") return { status: outcome, title: "Product identifier not yet activated", message: "This product identifier exists but has not yet been activated for public verification.", duplicateScan: scan.duplicate, scansRecorded: scan.scansRecorded };
+    if (outcome === "SUSPICIOUS_ACTIVITY") return { status: outcome, title: "Unusual verification activity", message: "This identity has been checked from many independent sessions in a short period. This pattern is not proof of counterfeiting; inspect the product and report concerns.", scansRecorded: scan.scansRecorded };
+    if (scan.duplicate && (outcome === "VERIFIED" || outcome === "PREVIOUSLY_SCANNED")) return { status: "VERIFIED", title: "Already checked in this session", message: "This identity was already checked in this browser session. Refreshes do not count as additional independent scans.", duplicateScan: true, scansRecorded: scan.scansRecorded };
     const batch = identity.batch; const product = batch.product;
     return {
       status: outcome,

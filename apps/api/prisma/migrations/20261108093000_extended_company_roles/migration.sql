@@ -1,0 +1,2 @@
+ALTER TYPE "MembershipRole" ADD VALUE 'FINANCE';
+ALTER TYPE "MembershipRole" ADD VALUE 'SUPPORT';

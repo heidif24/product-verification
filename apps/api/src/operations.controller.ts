@@ -1,17 +1,19 @@
-import { Body, Controller, Get, Post, Put, Delete, Param, Query, Req, UseGuards, Injectable, BadRequestException, ForbiddenException, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, Get, Post, Put, Delete, Param, Query, Req, UseGuards, Injectable, Inject, BadRequestException, ForbiddenException, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import { JwtService } from "@nestjs/jwt";
 import { createHmac, randomBytes } from "node:crypto";
 import * as bcrypt from "bcryptjs";
 import type { Request } from "express";
 import { PrismaService } from "./prisma.service";
+import { appendAudit, verifyAuditChain } from "./audit";
+import { PAYMENT_PROVIDER, PaymentProvider } from "./payments.service";
 import { AuthRequest, Public } from "./auth";
 import { sendPanEmail } from "./mailer";
 import { confirmPrivateUpload, createPrivateDownloadUrl, createPrivateUploadUrl, privateDocumentKey } from "./storage";
 
 const hash = (value: string) => createHmac("sha256", process.env.TOKEN_PEPPER!).update(value).digest("hex");
 const roles = ["OWNER", "ADMIN", "OPERATOR", "ANALYST"] as const;
-type Role = typeof roles[number];
+type Role = typeof roles[number] | "FINANCE" | "SUPPORT";
 
 async function workspaceRole(db: PrismaService, req: AuthRequest, allowed: Role[]) {
   const membership = await db.membership.findUnique({ where: { userId_manufacturerId: { userId: req.user.sub, manufacturerId: req.user.manufacturerId } } });
@@ -59,6 +61,15 @@ export class SuperAdminController {
     ]);
     return { companies, pending, products, batches, identities, scans, quarantined };
   }
+  @Get("scan-risk")
+  scanRisk() {
+    return this.db.verificationEvent.findMany({
+      where: { riskLevel: "HIGH", identityId: { not: null } },
+      select: { id: true, outcome: true, riskLevel: true, createdAt: true, identity: { select: { publicCode: true, verificationCount: true, batch: { select: { batchCode: true, product: { select: { name: true, manufacturer: { select: { legalName: true } } } } } } } },
+      orderBy: { createdAt: "desc" },
+      take: 200
+    });
+  }
   @Get("companies")
   async companies(@Query("status") status = "PENDING", @Query("q") q = "") {
     const where: any = {};
@@ -83,24 +94,83 @@ export class SuperAdminController {
     const status = body.status, reason = body.reason?.trim();
     if (!["APPROVED", "SUSPENDED", "PENDING"].includes(status || "") || !reason || reason.length < 10) throw new BadRequestException("Choose a valid status and provide a review reason of at least 10 characters.");
     return this.db.$transaction(async tx => {
+      const previous = await tx.manufacturer.findUnique({ where: { id }, select: { status: true } });
       const row = await tx.manufacturer.update({ where: { id }, data: { status: status as any } });
-      await tx.auditLog.create({ data: { actor: "SUPER_ADMIN", action: "COMPANY_STATUS_" + status, targetType: "MANUFACTURER", targetId: id, reason } });
+      await appendAudit(tx, { actor: "SUPER_ADMIN", action: "COMPANY_STATUS_" + status, targetType: "MANUFACTURER", targetId: id, reason, metadata: { before: { status: previous?.status ?? null }, after: { status: row.status } } });
       return { id: row.id, legalName: row.legalName, status: row.status };
     });
+  }
+  @Get("credit-packages")
+  creditPackages() {
+    return this.db.creditPackage.findMany({ orderBy: [{ active: "desc" }, { credits: "asc" }] });
+  }
+  @Post("credit-packages")
+  async createCreditPackage(@Body() body: { name?: string; credits?: number; amountMinor?: number; reason?: string }) {
+    const name = body.name?.trim(), credits = Number(body.credits), amountMinor = Number(body.amountMinor), reason = body.reason?.trim();
+    if (!name || name.length > 80 || !Number.isInteger(credits) || credits < 1 || credits > 10000000 || !Number.isInteger(amountMinor) || amountMinor < 100 || amountMinor > 1000000000 || !reason || reason.length < 10) throw new BadRequestException("Enter a package name, positive credit and NGN amounts, and a reason of at least 10 characters.");
+    return this.db.$transaction(async tx => {
+      const pack = await tx.creditPackage.create({ data: { name, credits, amountMinor, currency: "NGN" } });
+      await appendAudit(tx, { actor: "SUPER_ADMIN", action: "CREDIT_PACKAGE_CREATED", targetType: "CREDIT_PACKAGE", targetId: pack.id, reason });
+      return pack;
+    });
+  }
+  @Put("credit-packages/:id")
+  async updateCreditPackage(@Param("id") id: string, @Body() body: { name?: string; credits?: number; amountMinor?: number; active?: boolean; reason?: string }) {
+    const reason = body.reason?.trim();
+    if (!reason || reason.length < 10 || (body.name !== undefined && (!body.name.trim() || body.name.trim().length > 80)) || (body.credits !== undefined && (!Number.isInteger(body.credits) || body.credits < 1 || body.credits > 10000000)) || (body.amountMinor !== undefined && (!Number.isInteger(body.amountMinor) || body.amountMinor < 100 || body.amountMinor > 1000000000)) || (body.active !== undefined && typeof body.active !== "boolean")) throw new BadRequestException("Provide valid package values and a reason of at least 10 characters.");
+    return this.db.$transaction(async tx => {
+      const pack = await tx.creditPackage.update({ where: { id }, data: { ...(body.name !== undefined ? { name: body.name.trim() } : {}), ...(body.credits !== undefined ? { credits: body.credits } : {}), ...(body.amountMinor !== undefined ? { amountMinor: body.amountMinor } : {}), ...(body.active !== undefined ? { active: body.active } : {}) } });
+      await appendAudit(tx, { actor: "SUPER_ADMIN", action: "CREDIT_PACKAGE_UPDATED", targetType: "CREDIT_PACKAGE", targetId: id, reason });
+      return pack;
+    });
+  }
+  @Post("companies/:id/promotional-credit")
+  async grantPromotionalCredit(@Param("id") id: string, @Body() body: { amountCredits?: number; reason?: string }) {
+    const amountCredits = Number(body.amountCredits ?? 100000), reason = body.reason?.trim();
+    if (!Number.isInteger(amountCredits) || amountCredits < 1 || amountCredits > 1000000 || !reason || reason.length < 10) throw new BadRequestException("Provide a promotional allocation up to 1,000,000 credits and an audit reason.");
+    try {
+      return await this.db.$transaction(async tx => {
+        const company = await tx.manufacturer.findUnique({ where: { id }, select: { id: true, status: true } });
+        if (!company) throw new NotFoundException("Company workspace not found.");
+        if (company.status !== "APPROVED") throw new BadRequestException("Promotional credits are available only to approved manufacturers.");
+        const entry = await tx.walletEntry.create({ data: { manufacturerId: id, amountCredits, type: "PROMOTION_CREDIT", idempotencyKey: "promotion:first-allocation:" + id, actorId: "SUPER_ADMIN", reason } });
+        await appendAudit(tx, { actor: "SUPER_ADMIN", action: "PROMOTIONAL_CREDIT_GRANTED", targetType: "MANUFACTURER", targetId: id, reason: `${amountCredits} credits: ${reason}` });
+        return { granted: entry.amountCredits, entryId: entry.id };
+      }, { isolationLevel: "Serializable" });
+    } catch (error: any) {
+      if (error?.code === "P2002") throw new BadRequestException("This manufacturer has already received its promotional credit allocation.");
+      throw error;
+    }
+  }
+  @Post("companies/:id/wallet-adjustments")
+  async adjustCompanyWallet(@Param("id") id: string, @Body() body: { amountCredits?: number; idempotencyKey?: string; reason?: string }) {
+    const amountCredits = Number(body.amountCredits), reason = body.reason?.trim(), idempotencyKey = body.idempotencyKey?.trim();
+    if (!Number.isInteger(amountCredits) || amountCredits === 0 || Math.abs(amountCredits) > 10000000 || !idempotencyKey || !/^[A-Za-z0-9._:-]{8,100}$/.test(idempotencyKey) || !reason || reason.length < 10) throw new BadRequestException("Provide a nonzero adjustment up to 10,000,000 credits, unique reference and reason.");
+    return this.db.$transaction(async tx => {
+      const company = await tx.manufacturer.findUnique({ where: { id }, select: { id: true } });
+      if (!company) throw new NotFoundException("Company workspace not found.");
+      const current = await tx.walletEntry.aggregate({ where: { manufacturerId: id }, _sum: { amountCredits: true } });
+      if ((current._sum.amountCredits || 0) + amountCredits < 0) throw new BadRequestException("This adjustment would make the wallet balance negative.");
+      const entry = await tx.walletEntry.create({ data: { manufacturerId: id, amountCredits, type: "ADMIN_ADJUSTMENT", idempotencyKey: "admin-adjustment:" + idempotencyKey, actorId: "SUPER_ADMIN", reason } });
+      await appendAudit(tx, { actor: "SUPER_ADMIN", action: "WALLET_ADJUSTED", targetType: "MANUFACTURER", targetId: id, reason: `${amountCredits} credits: ${reason}`, metadata: { beforeBalance: current._sum.amountCredits || 0, amountCredits, afterBalance: (current._sum.amountCredits || 0) + amountCredits, idempotencyKey } });
+      return { amountCredits: entry.amountCredits, entryId: entry.id };
+    }, { isolationLevel: "Serializable" });
   }
   @Post("documents/:id/review")
   async reviewDocument(@Param("id") id: string, @Body() body: { status?: string; note?: string }) {
     if (!["UNDER_REVIEW", "ACCEPTED", "REJECTED"].includes(body.status || "")) throw new BadRequestException("Choose a valid document review status.");
-    const document = await this.db.manufacturerDocument.update({ where: { id }, data: { reviewStatus: body.status as any, reviewNote: body.note?.trim() || null, reviewedAt: new Date() } });
-    await this.db.auditLog.create({ data: { actor: "SUPER_ADMIN", action: "DOCUMENT_" + body.status, targetType: "MANUFACTURER_DOCUMENT", targetId: id, reason: body.note?.trim() || "Document review status updated." } });
-    return document;
+    return this.db.$transaction(async tx => {
+      const document = await tx.manufacturerDocument.update({ where: { id }, data: { reviewStatus: body.status as any, reviewNote: body.note?.trim() || null, reviewedAt: new Date() } });
+      await appendAudit(tx, { actor: "SUPER_ADMIN", action: "DOCUMENT_" + body.status, targetType: "MANUFACTURER_DOCUMENT", targetId: id, reason: body.note?.trim() || "Document review status updated." });
+      return document;
+    });
   }
   @Get("identities")
   async identities(@Query("q") q = "", @Query("status") status = "") {
     const where: any = {};
     if (q.trim()) where.publicCode = { contains: q.trim().toUpperCase(), mode: "insensitive" };
     if (["ACTIVE", "QUARANTINED", "REVOKED"].includes(status)) where.status = status;
-    return this.db.productIdentity.findMany({ where, include: { batch: { include: { product: { include: { manufacturer: { select: { id: true, legalName: true } } } } } }, carton: { select: { publicCode: true } }, _count: { select: { containedUnits: true } } }, orderBy: { issuedAt: "desc" }, take: 100 });
+    return this.db.productIdentity.findMany({ where, select: { id: true, publicCode: true, level: true, status: true, verificationCount: true, issuedAt: true, batch: { select: { batchCode: true, product: { select: { name: true, manufacturer: { select: { id: true, legalName: true } } } } } }, carton: { select: { publicCode: true } }, _count: { select: { containedUnits: true } } }, orderBy: { issuedAt: "desc" }, take: 100 });
   }
   @Post("identities/:id/:action")
   async identityAction(@Param("id") id: string, @Param("action") action: string, @Body() body: { reason?: string }) {
@@ -108,8 +178,9 @@ export class SuperAdminController {
     const status = state[action], reason = body.reason?.trim();
     if (!status || !reason || reason.length < 10) throw new BadRequestException("Choose release, quarantine or revoke and provide a reason.");
     return this.db.$transaction(async tx => {
+      const previous = await tx.productIdentity.findUnique({ where: { id }, select: { status: true } });
       const identity = await tx.productIdentity.update({ where: { id }, data: { status }, select: { id: true, publicCode: true, level: true, status: true } });
-      await tx.auditLog.create({ data: { actor: "SUPER_ADMIN", action: "IDENTITY_" + action.toUpperCase(), targetType: "PRODUCT_IDENTITY", targetId: id, reason } });
+      await appendAudit(tx, { actor: "SUPER_ADMIN", action: "IDENTITY_" + action.toUpperCase(), targetType: "PRODUCT_IDENTITY", targetId: id, reason, metadata: { before: { status: previous?.status ?? null }, after: { status: identity.status } } });
       return identity;
     });
   }
@@ -120,16 +191,9 @@ export class SuperAdminController {
       where,
       include: {
         identity: {
-          include: {
-            batch: {
-              include: {
-                product: {
-                  include: {
-                    manufacturer: { select: { legalName: true } }
-                  }
-                }
-              }
-            }
+          select: {
+            publicCode: true,
+            batch: { select: { batchCode: true, product: { select: { name: true, manufacturer: { select: { legalName: true } } } } } }
           }
         }
       },
@@ -139,10 +203,13 @@ export class SuperAdminController {
   }
   @Post("reports/:id/status")
   async updateReport(@Param("id") id: string, @Body() body: { status?: string; note?: string }) {
-    if (!["IN_REVIEW", "RESOLVED", "DISMISSED"].includes(body.status || "")) throw new BadRequestException("Choose a valid report status.");
-    const report = await this.db.consumerReport.update({ where: { id }, data: { status: body.status!, adminNote: body.note?.trim() || null } });
-    await this.db.auditLog.create({ data: { actor: "SUPER_ADMIN", action: "CONSUMER_REPORT_" + body.status, targetType: "CONSUMER_REPORT", targetId: id, reason: body.note?.trim() || "Consumer report status updated." } });
-    return report;
+    if (!["IN_REVIEW", "CONFIRMED_ISSUE", "RESOLVED", "FALSE_REPORT", "DISMISSED"].includes(body.status || "")) throw new BadRequestException("Choose a valid report status.");
+    return this.db.$transaction(async tx => {
+      const previous = await tx.consumerReport.findUnique({ where: { id }, select: { status: true } });
+      const report = await tx.consumerReport.update({ where: { id }, data: { status: body.status!, adminNote: body.note?.trim() || null } });
+      await appendAudit(tx, { actor: "SUPER_ADMIN", action: "CONSUMER_REPORT_" + body.status, targetType: "CONSUMER_REPORT", targetId: id, reason: body.note?.trim() || "Consumer report status updated.", metadata: { before: { status: previous?.status ?? null }, after: { status: report.status } } });
+      return report;
+    });
   }
   @Get("privacy-requests")
   privacyRequests(@Query("status") status = "") {
@@ -152,19 +219,34 @@ export class SuperAdminController {
   @Post("privacy-requests/:id/status")
   async updatePrivacyRequest(@Param("id") id: string, @Body() body: { status?: string; note?: string }) {
     if (!["IN_REVIEW", "COMPLETED", "REJECTED"].includes(body.status || "")) throw new BadRequestException("Choose a valid privacy request status.");
-    const request = await this.db.privacyRequest.update({ where: { id }, data: { status: body.status!, adminNote: body.note?.trim() || null } });
-    await this.db.auditLog.create({ data: { actor: "SUPER_ADMIN", action: "PRIVACY_REQUEST_" + body.status, targetType: "PRIVACY_REQUEST", targetId: id, reason: body.note?.trim() || "Privacy request status updated." } });
-    return request;
+    return this.db.$transaction(async tx => {
+      const previous = await tx.privacyRequest.findUnique({ where: { id }, select: { status: true } });
+      const request = await tx.privacyRequest.update({ where: { id }, data: { status: body.status!, adminNote: body.note?.trim() || null } });
+      await appendAudit(tx, { actor: "SUPER_ADMIN", action: "PRIVACY_REQUEST_" + body.status, targetType: "PRIVACY_REQUEST", targetId: id, reason: body.note?.trim() || "Privacy request status updated.", metadata: { before: { status: previous?.status ?? null }, after: { status: request.status } } });
+      return request;
+    });
   }
   @Get("audit")
-  audit(@Query("limit") limit = "100") {
-    return this.db.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: Math.min(250, Math.max(1, Number(limit) || 100)) });
+  async audit(@Query("limit") limit = "100") {
+    const entries = await this.db.auditLog.findMany({ orderBy: { sequence: "desc" }, take: Math.min(250, Math.max(1, Number(limit) || 100)) });
+    return entries.map(entry => ({ ...entry, sequence: entry.sequence.toString() }));
+  }
+  @Get("audit/integrity")
+  async auditIntegrity() {
+    const [entries, legacyEntries, head] = await Promise.all([
+      this.db.auditLog.findMany({ where: { entryHash: { not: null } }, orderBy: { sequence: "asc" } }),
+      this.db.auditLog.count({ where: { entryHash: null } }),
+      this.db.auditChainHead.findUnique({ where: { id: 1 } })
+    ]);
+    const last = entries[entries.length - 1];
+    const headMatches = last ? head?.lastHash === last.entryHash && head.lastSequence === last.sequence : !head?.lastHash;
+    return { valid: verifyAuditChain(entries as any) && headMatches, chainedEntries: entries.length, legacyEntries, headSequence: head?.lastSequence.toString() || "0" };
   }
 }
 
 @Controller("v1/manufacturer")
 export class ManufacturerOperationsController {
-  constructor(private db: PrismaService) {}
+  constructor(private db: PrismaService, @Inject(PAYMENT_PROVIDER) private payments: PaymentProvider) {}
   @Get("profile")
   async profile(@Req() req: AuthRequest) {
     await workspaceRole(this.db, req, [...roles]);
@@ -187,7 +269,7 @@ export class ManufacturerOperationsController {
         ...(body.industry !== undefined ? { industry: body.industry.trim() || null } : {}),
         ...(identityChanged ? { status: "PENDING" } : {})
       } });
-      if (identityChanged) await tx.auditLog.create({ data: { actor: req.user.sub, action: "PRODUCER_IDENTITY_DETAILS_CHANGED", targetType: "MANUFACTURER", targetId: current.id, reason: "Legal company name or registration reference changed; workspace returned to PAN review." } });
+      if (identityChanged) await appendAudit(tx, { actor: req.user.sub, action: "PRODUCER_IDENTITY_DETAILS_CHANGED", targetType: "MANUFACTURER", targetId: current.id, reason: "Legal company name or registration reference changed; workspace returned to PAN review." });
       return updated;
     });
   }
@@ -251,12 +333,16 @@ export class ManufacturerOperationsController {
   async invite(@Req() req: AuthRequest, @Body() body: { email?: string; role?: string }) {
     const actor = await workspaceRole(this.db, req, ["OWNER", "ADMIN"]);
     const email = body.email?.trim().toLowerCase(), role = body.role as Role;
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !["ADMIN", "OPERATOR", "ANALYST"].includes(role)) throw new BadRequestException("Enter a valid email and choose Admin, Operator or Analyst.");
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !["ADMIN", "OPERATOR", "ANALYST", "FINANCE", "SUPPORT"].includes(role)) throw new BadRequestException("Enter a valid email and choose a supported workspace role.");
     if (role === "ADMIN" && actor.role !== "OWNER") throw new ForbiddenException("Only the workspace owner can invite another administrator.");
     const existing = await this.db.user.findUnique({ where: { email }, include: { memberships: true } });
     if (existing?.memberships.some(m => m.manufacturerId === req.user.manufacturerId)) throw new BadRequestException("This person is already a workspace member.");
     const raw = randomBytes(32).toString("base64url");
-    const invitation = await this.db.invitation.create({ data: { manufacturerId: req.user.manufacturerId, email, role, tokenHash: hash(raw), expiresAt: new Date(Date.now() + 7 * 86400000) } });
+    const invitation = await this.db.$transaction(async tx => {
+      const created = await tx.invitation.create({ data: { manufacturerId: req.user.manufacturerId, email, role, tokenHash: hash(raw), expiresAt: new Date(Date.now() + 7 * 86400000) } });
+      await appendAudit(tx, { actor: req.user.sub, action: "TEAM_INVITATION_CREATED", targetType: "INVITATION", targetId: created.id, reason: `Invitation created for the ${role} workspace role.`, metadata: { role, expiresAt: created.expiresAt.toISOString() } });
+      return created;
+    });
     const link = (process.env.MANUFACTURER_APP_URL || "http://localhost:3000") + "/accept-invite?token=" + encodeURIComponent(raw);
     await sendPanEmail(email, "You have been invited to a PAN workspace", "<p>You have been invited to join a manufacturer workspace on PAN.</p><p><a href=\"" + link + "\">Accept invitation</a></p><p>This invitation expires in seven days.</p>");
     return { id: invitation.id, email, role, expiresAt: invitation.expiresAt, sent: true, ...(process.env.NODE_ENV === "test" ? { testInvitationToken: raw } : {}) };
@@ -264,26 +350,135 @@ export class ManufacturerOperationsController {
   @Post("team/invitations/:id/revoke")
   async revokeInvite(@Req() req: AuthRequest, @Param("id") id: string) {
     await workspaceRole(this.db, req, ["OWNER", "ADMIN"]);
-    const result = await this.db.invitation.updateMany({ where: { id, manufacturerId: req.user.manufacturerId, status: "PENDING" }, data: { status: "REVOKED" } });
-    if (!result.count) throw new NotFoundException("Pending invitation not found.");
-    return { revoked: true };
+    return this.db.$transaction(async tx => {
+      const result = await tx.invitation.updateMany({ where: { id, manufacturerId: req.user.manufacturerId, status: "PENDING" }, data: { status: "REVOKED" } });
+      if (!result.count) throw new NotFoundException("Pending invitation not found.");
+      await appendAudit(tx, { actor: req.user.sub, action: "TEAM_INVITATION_REVOKED", targetType: "INVITATION", targetId: id, reason: "Pending workspace invitation revoked by a company administrator." });
+      return { revoked: true };
+    });
   }
   @Post("team/:userId/role")
   async changeRole(@Req() req: AuthRequest, @Param("userId") userId: string, @Body() body: { role?: string }) {
     const actor = await workspaceRole(this.db, req, ["OWNER", "ADMIN"]);
-    if (!["ADMIN", "OPERATOR", "ANALYST"].includes(body.role || "")) throw new BadRequestException("Choose Admin, Operator or Analyst.");
+    if (!["ADMIN", "OPERATOR", "ANALYST", "FINANCE", "SUPPORT"].includes(body.role || "")) throw new BadRequestException("Choose a supported workspace role.");
     const target = await this.db.membership.findUnique({ where: { userId_manufacturerId: { userId, manufacturerId: req.user.manufacturerId } } });
     if (!target || target.role === "OWNER") throw new ForbiddenException("The workspace owner cannot be changed here.");
     if (actor.role !== "OWNER" && (target.role === "ADMIN" || body.role === "ADMIN")) throw new ForbiddenException("Only the workspace owner can manage administrator roles.");
-    return this.db.membership.update({ where: { id: target.id }, data: { role: body.role as Role }, select: { id: true, role: true, userId: true } });
+    return this.db.$transaction(async tx => {
+      const updated = await tx.membership.update({ where: { id: target.id }, data: { role: body.role as Role }, select: { id: true, role: true, userId: true } });
+      await appendAudit(tx, { actor: req.user.sub, action: "TEAM_ROLE_CHANGED", targetType: "MEMBERSHIP", targetId: target.id, reason: `Workspace role changed from ${target.role} to ${updated.role}.`, metadata: { before: { role: target.role }, after: { role: updated.role }, userId } });
+      return updated;
+    });
   }
   @Delete("team/:userId")
   async removeMember(@Req() req: AuthRequest, @Param("userId") userId: string) {
     const actor = await workspaceRole(this.db, req, ["OWNER", "ADMIN"]);
-    const target = await this.db.membership.findUnique({ where: { userId_manufacturerId: { userId, manufacturerId: req.user.manufacturerId } } });
-    if (!target || target.role === "OWNER" || (actor.role !== "OWNER" && target.role === "ADMIN")) throw new ForbiddenException("This member cannot be removed by your role.");
-    await this.db.membership.delete({ where: { id: target.id } });
-    return { removed: true };
+    return this.db.$transaction(async tx => {
+      const target = await tx.membership.findUnique({ where: { userId_manufacturerId: { userId, manufacturerId: req.user.manufacturerId } } });
+      if (!target || target.role === "OWNER" || (actor.role !== "OWNER" && target.role === "ADMIN")) throw new ForbiddenException("This member cannot be removed by your role.");
+      await tx.membership.delete({ where: { id: target.id } });
+      await appendAudit(tx, { actor: req.user.sub, action: "TEAM_MEMBER_REMOVED", targetType: "MEMBERSHIP", targetId: target.id, reason: `Workspace member with role ${target.role} was removed.`, metadata: { before: { role: target.role }, userId } });
+      return { removed: true };
+    });
+  }
+  @Get("wallet")
+  async wallet(@Req() req: AuthRequest) {
+    await workspaceRole(this.db, req, ["OWNER", "ADMIN", "FINANCE"]);
+    const manufacturerId = req.user.manufacturerId;
+    const [balance, entries, payments, packages] = await Promise.all([
+      this.db.walletEntry.aggregate({ where: { manufacturerId }, _sum: { amountCredits: true } }),
+      this.db.walletEntry.findMany({ where: { manufacturerId }, orderBy: { createdAt: "desc" }, take: 100 }),
+      this.db.payment.findMany({ where: { manufacturerId }, orderBy: { createdAt: "desc" }, take: 25, select: { reference: true, provider: true, status: true, amountMinor: true, currency: true, credits: true, createdAt: true, paidAt: true } }),
+      this.db.creditPackage.findMany({ where: { active: true }, orderBy: { credits: "asc" }, select: { id: true, name: true, credits: true, amountMinor: true, currency: true } })
+    ]);
+    return { balance: balance._sum.amountCredits || 0, entries, payments, packages };
+  }
+  @Post("wallet/payments")
+  async createWalletPayment(@Req() req: AuthRequest, @Body() body: { packageId?: string }) {
+    await workspaceRole(this.db, req, ["OWNER", "ADMIN", "FINANCE"]);
+    const pack = await this.db.creditPackage.findFirst({ where: { id: body.packageId || "", active: true } });
+    if (!pack || pack.currency !== "NGN") throw new NotFoundException("Credit package not found or unavailable.");
+    const [user, company] = await Promise.all([
+      this.db.user.findUnique({ where: { id: req.user.sub }, select: { email: true } }),
+      this.db.manufacturer.findUnique({ where: { id: req.user.manufacturerId }, select: { status: true } })
+    ]);
+    if (!user) throw new UnauthorizedException("Your account is no longer available.");
+    if (company?.status !== "APPROVED") throw new ForbiddenException("Only approved manufacturer workspaces can purchase code credits.");
+    const reference = "PAN_" + randomBytes(18).toString("hex");
+    const payment = await this.db.payment.create({ data: { manufacturerId: req.user.manufacturerId, packageId: pack.id, reference, amountMinor: pack.amountMinor, currency: pack.currency, credits: pack.credits } });
+    try {
+      const callbackUrl = (process.env.MANUFACTURER_APP_URL || "http://localhost:3000").replace(/\/$/, "") + "/portal/wallet?reference=" + encodeURIComponent(reference);
+      const checkout = await this.payments.initialize({ reference, email: user.email, amountMinor: payment.amountMinor, currency: payment.currency, callbackUrl });
+      return { reference, authorizationUrl: checkout.authorizationUrl, amountMinor: payment.amountMinor, currency: payment.currency, credits: payment.credits };
+    } catch (error) {
+      await this.db.$transaction(async tx => {
+        const failed = await tx.payment.updateMany({ where: { id: payment.id, status: "PENDING" }, data: { status: "FAILED" } });
+        if (failed.count) await appendAudit(tx, { actor: req.user.sub, action: "WALLET_PAYMENT_INITIALIZATION_FAILED", targetType: "PAYMENT", targetId: payment.id, reason: "Payment checkout initialization failed before customer redirection.", metadata: { reference, amountMinor: payment.amountMinor, currency: payment.currency } });
+      });
+      throw error;
+    }
+  }
+  @Post("wallet/payments/:reference/verify")
+  async verifyWalletPayment(@Req() req: AuthRequest, @Param("reference") reference: string) {
+    await workspaceRole(this.db, req, ["OWNER", "ADMIN", "FINANCE"]);
+    const payment = await this.db.payment.findFirst({ where: { reference, manufacturerId: req.user.manufacturerId } });
+    if (!payment) throw new NotFoundException("Wallet payment not found.");
+    if (payment.status === "PAID") return { status: payment.status, credits: payment.credits };
+    const verified = await this.payments.verify(payment.reference);
+    if (verified.reference !== payment.reference || verified.amountMinor !== payment.amountMinor || verified.currency !== payment.currency) throw new BadRequestException("The payment provider response does not match this wallet transaction.");
+    if (verified.status !== "success") {
+      if (verified.status === "failed") await this.db.payment.updateMany({ where: { id: payment.id, status: "PENDING" }, data: { status: "FAILED", providerReference: verified.providerReference } });
+      return { status: verified.status === "failed" ? "FAILED" : "PENDING", credits: 0 };
+    }
+    const paidAt = new Date();
+    await this.db.$transaction(async tx => {
+      const updated = await tx.payment.updateMany({ where: { id: payment.id, status: "PENDING" }, data: { status: "PAID", providerReference: verified.providerReference, paidAt } });
+      if (!updated.count) return;
+      await tx.walletEntry.create({ data: { manufacturerId: payment.manufacturerId, amountCredits: payment.credits, type: "PAYMENT_CREDIT", idempotencyKey: "payment:" + payment.id, actorId: "PAYSTACK", reason: "Verified Paystack payment " + payment.reference } });
+      await appendAudit(tx, { actor: req.user.sub, action: "WALLET_PAYMENT_CREDITED", targetType: "PAYMENT", targetId: payment.id, reason: `${payment.credits} credits from provider-verified payment ${payment.reference}.`, metadata: { reference: payment.reference, credits: payment.credits, amountMinor: payment.amountMinor, currency: payment.currency, providerReference: verified.providerReference } });
+    }, { isolationLevel: "Serializable" });
+    const finalPayment = await this.db.payment.findUnique({ where: { id: payment.id }, select: { status: true, credits: true } });
+    return { status: finalPayment?.status || "PENDING", credits: finalPayment?.status === "PAID" ? finalPayment.credits : 0 };
+  }
+  @Get("reports")
+  async manufacturerReports(@Req() req: AuthRequest, @Query("status") status = "") {
+    await workspaceRole(this.db, req, ["OWNER", "ADMIN", "ANALYST", "SUPPORT"]);
+    const allowed = ["OPEN", "IN_REVIEW", "CONFIRMED_ISSUE", "RESOLVED", "FALSE_REPORT", "DISMISSED"];
+    if (status && !allowed.includes(status)) throw new BadRequestException("Unknown report status.");
+    return this.db.consumerReport.findMany({
+      where: {
+        ...(status ? { status } : {}),
+        identity: { is: { batch: { product: { manufacturerId: req.user.manufacturerId } } } }
+      },
+      include: { identity: { select: { publicCode: true, verificationCount: true, events: { orderBy: { createdAt: "desc" }, take: 50, select: { outcome: true, createdAt: true, isIndependent: true } }, batch: { select: { batchCode: true, product: { select: { name: true, brand: true } } } } } },
+      orderBy: { createdAt: "desc" },
+      take: 200
+    });
+  }
+  @Get("scan-risk")
+  async manufacturerScanRisk(@Req() req: AuthRequest) {
+    await workspaceRole(this.db, req, ["OWNER", "ADMIN", "ANALYST", "SUPPORT"]);
+    return this.db.verificationEvent.findMany({
+      where: { riskLevel: "HIGH", identity: { is: { batch: { product: { manufacturerId: req.user.manufacturerId } } } } },
+      select: { id: true, outcome: true, riskLevel: true, createdAt: true, identity: { select: { publicCode: true, verificationCount: true, batch: { select: { batchCode: true, product: { select: { name: true } } } } } },
+      orderBy: { createdAt: "desc" },
+      take: 100
+    });
+  }
+  @Post("reports/:id/status")
+  async updateManufacturerReport(@Req() req: AuthRequest, @Param("id") id: string, @Body() body: { status?: string; note?: string }) {
+    await workspaceRole(this.db, req, ["OWNER", "ADMIN", "SUPPORT"]);
+    const statuses = ["IN_REVIEW", "CONFIRMED_ISSUE", "RESOLVED", "FALSE_REPORT"];
+    const note = body.note?.trim() || "";
+    if (!statuses.includes(body.status || "") || note.length < 10 || note.length > 1000) throw new BadRequestException("Choose a valid report state and provide a review note of 10 to 1,000 characters.");
+    return this.db.$transaction(async tx => {
+      const report = await tx.consumerReport.findFirst({ where: { id, identity: { is: { batch: { product: { manufacturerId: req.user.manufacturerId } } } } }, select: { id: true } });
+      if (!report) throw new NotFoundException("Consumer report not found in this manufacturer workspace.");
+      const previous = await tx.consumerReport.findUnique({ where: { id }, select: { status: true } });
+      const updated = await tx.consumerReport.update({ where: { id }, data: { status: body.status!, adminNote: note } });
+      await appendAudit(tx, { actor: req.user.sub, action: "MANUFACTURER_REPORT_" + body.status, targetType: "CONSUMER_REPORT", targetId: id, reason: note, metadata: { before: { status: previous?.status ?? null }, after: { status: updated.status } } });
+      return updated;
+    });
   }
   @Get("batches")
   async allBatches(@Req() req: AuthRequest) {
@@ -316,7 +511,13 @@ export class ManufacturerOperationsController {
         const unitsRequired = unitsReservedByPendingCartons + cartonQuantity * batch.unitsPerCarton!;
         if (unassignedUnits < unitsRequired) throw new BadRequestException("There are not enough unassigned individual-unit identities remaining after accounting for queued carton jobs. Wait for pending carton jobs to finish or issue more unit identities.");
       }
-      return tx.issuanceJob.create({ data: { manufacturerId: req.user.manufacturerId, batchId: id, createdById: req.user.sub, unitQuantity, cartonQuantity } });
+      const creditsRequired = unitQuantity + cartonQuantity;
+      const wallet = await tx.walletEntry.aggregate({ where: { manufacturerId: req.user.manufacturerId }, _sum: { amountCredits: true } });
+      if ((wallet._sum.amountCredits || 0) < creditsRequired) throw new BadRequestException(`Insufficient code credits. ${creditsRequired} credits are required for this issuance job.`);
+      const job = await tx.issuanceJob.create({ data: { manufacturerId: req.user.manufacturerId, batchId: id, createdById: req.user.sub, unitQuantity, cartonQuantity } });
+      await tx.walletEntry.create({ data: { manufacturerId: req.user.manufacturerId, amountCredits: -creditsRequired, type: "ISSUANCE_DEBIT", idempotencyKey: "issuance:" + job.id, actorId: req.user.sub, reason: `${creditsRequired} credits reserved for issuance job ${job.id}.` } });
+      await appendAudit(tx, { actor: req.user.sub, action: "CODE_CREDITS_DEBITED", targetType: "ISSUANCE_JOB", targetId: job.id, reason: `${creditsRequired} credits charged for ${unitQuantity} unit and ${cartonQuantity} carton identities.`, metadata: { unitQuantity, cartonQuantity, creditsRequired, balanceBefore: wallet._sum.amountCredits || 0, balanceAfter: (wallet._sum.amountCredits || 0) - creditsRequired } });
+      return job;
     }, { isolationLevel: "Serializable" });
   }
   @Get("issuance-jobs/:id")
@@ -340,8 +541,27 @@ export class ManufacturerOperationsController {
       decipher.setAuthTag(Buffer.from(tag, "base64url"));
       const plain = Buffer.concat([decipher.update(Buffer.from(ciphertext, "base64url")), decipher.final()]).toString("utf8");
       assets = JSON.parse(plain).assets;
+      await this.db.$transaction(async tx => {
+        const exported = await tx.productIdentity.updateMany({ where: { issuanceJobId: job.id, status: "GENERATED" }, data: { status: "EXPORTED" } });
+        if (exported.count) await appendAudit(tx, { actor: req.user.sub, action: "IDENTITY_EXPORT_RETRIEVED", targetType: "ISSUANCE_JOB", targetId: job.id, reason: `${exported.count} product identities were retrieved for export.`, metadata: { from: "GENERATED", to: "EXPORTED", identities: exported.count } });
+      });
     }
     return { id: job.id, status: job.status, progress: job.progress, errorMessage: job.errorMessage, expiresAt: job.expiresAt, assets };
+  }
+  @Post("batches/:id/activate")
+  async activateBatch(@Req() req: AuthRequest, @Param("id") id: string, @Body() body: { qualityChecked?: boolean; reason?: string }) {
+    await workspaceRole(this.db, req, ["OWNER", "ADMIN", "OPERATOR"]);
+    if (body.qualityChecked !== true || !body.reason?.trim() || body.reason.trim().length < 10) throw new BadRequestException("Confirm print quality and provide a reason of at least 10 characters before activation.");
+    const producer = await this.db.manufacturer.findUnique({ where: { id: req.user.manufacturerId }, select: { status: true } });
+    if (producer?.status !== "APPROVED") throw new ForbiddenException("Your PAN producer workspace must be approved before activating product identities.");
+    const batch = await this.db.batch.findFirst({ where: { id, product: { manufacturerId: req.user.manufacturerId } }, select: { id: true } });
+    if (!batch) throw new NotFoundException("Production batch not found.");
+    return this.db.$transaction(async tx => {
+      const activated = await tx.productIdentity.updateMany({ where: { batchId: id, status: "EXPORTED" }, data: { status: "ACTIVE" } });
+      if (!activated.count) throw new BadRequestException("This batch has no exported identities awaiting activation.");
+      await appendAudit(tx, { actor: req.user.sub, action: "IDENTITIES_ACTIVATED", targetType: "BATCH", targetId: id, reason: body.reason!.trim(), metadata: { from: "EXPORTED", to: "ACTIVE", identities: activated.count } });
+      return { activated: activated.count, status: "ACTIVE" };
+    });
   }
   @Post("invitations/accept")
   @Public()
@@ -350,15 +570,16 @@ export class ManufacturerOperationsController {
     if (!invitation || invitation.status !== "PENDING" || invitation.expiresAt < new Date()) throw new BadRequestException("This invitation is invalid or has expired.");
     let user = await this.db.user.findUnique({ where: { email: invitation.email } });
     if (!user) {
-      if (!body.fullName?.trim() || !body.password || body.password.length < 10) throw new BadRequestException("Enter your name and a password of at least 10 characters.");
+      if (!body.fullName?.trim() || !body.password || body.password.length < 10 || Buffer.byteLength(body.password, "utf8") > 72) throw new BadRequestException("Enter your name and a password between 10 characters and 72 UTF-8 bytes.");
       user = await this.db.user.create({ data: { fullName: body.fullName.trim(), email: invitation.email, passwordHash: await bcrypt.hash(body.password, 12), emailVerifiedAt: new Date() } });
     } else if (!user.emailVerifiedAt) {
       user = await this.db.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
     }
-    await this.db.$transaction([
-      this.db.membership.create({ data: { userId: user.id, manufacturerId: invitation.manufacturerId, role: invitation.role } }),
-      this.db.invitation.update({ where: { id: invitation.id }, data: { status: "ACCEPTED", acceptedAt: new Date() } })
-    ]);
+    await this.db.$transaction(async tx => {
+      await tx.membership.create({ data: { userId: user!.id, manufacturerId: invitation.manufacturerId, role: invitation.role } });
+      await tx.invitation.update({ where: { id: invitation.id }, data: { status: "ACCEPTED", acceptedAt: new Date() } });
+      await appendAudit(tx, { actor: user!.id, action: "TEAM_INVITATION_ACCEPTED", targetType: "MANUFACTURER", targetId: invitation.manufacturerId, reason: `Invitation accepted for the ${invitation.role} workspace role.`, metadata: { role: invitation.role, userId: user!.id } });
+    });
     return { accepted: true, email: user.email };
   }
 }

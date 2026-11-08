@@ -7,7 +7,7 @@ import { AppModule } from "./app.module";
 
 function assertProductionConfiguration() {
   const required = [
-    "DATABASE_URL", "JWT_SECRET", "TOKEN_PEPPER", "ADMIN_API_KEY", "EXPORT_ENCRYPTION_KEY",
+    "DATABASE_URL", "JWT_SECRET", "TOKEN_PEPPER", "AUDIT_HMAC_KEY", "EXPORT_ENCRYPTION_KEY", "PAYSTACK_SECRET_KEY",
     "SUPER_ADMIN_EMAIL", "SUPER_ADMIN_PASSWORD_HASH", "PUBLIC_VERIFY_URL", "MANUFACTURER_APP_URL",
     "CORS_ORIGINS", "SMTP_HOST", "MAIL_FROM", "PRIVACY_CONTACT_EMAIL",
     "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"
@@ -16,12 +16,12 @@ function assertProductionConfiguration() {
     if (!process.env[key]?.trim()) throw new Error(`${key} is required in production.`);
   }
 
-  for (const key of ["JWT_SECRET", "TOKEN_PEPPER", "ADMIN_API_KEY"] as const) {
+  for (const key of ["JWT_SECRET", "TOKEN_PEPPER", "AUDIT_HMAC_KEY"] as const) {
     const value = process.env[key]!;
     if (value.length < 32 || value.startsWith("replace-with-")) throw new Error(`${key} must be a secure secret of at least 32 characters.`);
   }
-  if (new Set([process.env.JWT_SECRET, process.env.TOKEN_PEPPER, process.env.ADMIN_API_KEY]).size !== 3) {
-    throw new Error("JWT_SECRET, TOKEN_PEPPER and ADMIN_API_KEY must be different secrets.");
+  if (new Set([process.env.JWT_SECRET, process.env.TOKEN_PEPPER, process.env.AUDIT_HMAC_KEY]).size !== 3) {
+    throw new Error("JWT_SECRET, TOKEN_PEPPER and AUDIT_HMAC_KEY must be different secrets.");
   }
   if (!/^[a-f0-9]{64}$/i.test(process.env.EXPORT_ENCRYPTION_KEY || "")) {
     throw new Error("EXPORT_ENCRYPTION_KEY must be 32 random bytes encoded as 64 hexadecimal characters.");
@@ -56,7 +56,7 @@ function assertProductionConfiguration() {
 }
 
 async function bootstrap() {
-  for (const key of ["JWT_SECRET", "TOKEN_PEPPER", "ADMIN_API_KEY"] as const) {
+  for (const key of ["JWT_SECRET", "TOKEN_PEPPER", "AUDIT_HMAC_KEY"] as const) {
     const value = process.env[key];
     if (!value || value.length < 32 || value.startsWith("replace-with-")) throw new Error(`${key} must be configured with a secure independent secret.`);
   }

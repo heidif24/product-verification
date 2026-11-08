@@ -36,13 +36,13 @@ API: http://localhost:4000/api.
 
 Run pnpm --filter @pan/manufacturer-web dev and open http://localhost:3000/portal.
 
-The workspace provides company profile and CAC reference, facilities, private supporting-document upload, team invitations and roles, products, producer-supplied regulatory references, production batches, and Code Studio for separate carton and individual-unit identities. Code Studio provides queued generation, QR PNG ZIP, CSV manifest and print-ready PDF labels.
+The workspace provides company profile and CAC reference, facilities, private supporting-document upload, team roles, products, production batches, wallet/credit history, consumer reports, scan-risk review, and Code Studio for separate carton and individual-unit identities. Code Studio exports QR PNG ZIP, CSV manifest and print-ready PDF labels; exported identities require quality confirmation on /portal/activation before public verification.
 
 Email verification is required before manufacturer login. Local development without SMTP logs verification links in the API terminal; test mode exposes verification tokens only to automated CI tests.
 
 ## Public verification
 
-Run pnpm --filter @pan/verification-web dev and open http://localhost:3001. Consumers can scan a QR with their phone camera or enter a PAN code manually.
+Run pnpm --filter @pan/verification-web dev and open http://localhost:3001. Consumers can scan a QR with their phone camera, enter a PAN code manually, report a concern or open /download for mobile app store links.
 
 ## Consumer app
 
@@ -50,9 +50,11 @@ Set EXPO_PUBLIC_PAN_API_URL to an API URL reachable from the device. Android emu
 
 Run pnpm --filter @pan/consumer-mobile start.
 
+The public download page reads NEXT_PUBLIC_ANDROID_DOWNLOAD_URL and NEXT_PUBLIC_IOS_DOWNLOAD_URL. Store links remain unavailable until the production app listings are published and those URLs are configured.
+
 ## Super administrator console
 
-Open http://localhost:3000/admin and sign in with SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD_HASH. The short-lived super-admin JWT is held in session storage, not local storage. Company status changes, document decisions, privacy-request decisions and identity actions require a reason and are written to the audit trail. The public privacy page accepts data-subject requests; verify each requester before disclosing or changing any personal information.
+Open http://localhost:3000/admin and sign in with SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD_HASH. Use /admin/finance for credit packages and company allocations, and /admin/scan-risk for global risk events. The short-lived super-admin JWT is held in session storage, not local storage. Administrative decisions are chained in the audit log; verify data-subject requesters before disclosing or changing personal information.
 
 PAN approval means PAN has completed its own producer onboarding review. It is not NAFDAC registration, SON certification, product testing or government endorsement.
 

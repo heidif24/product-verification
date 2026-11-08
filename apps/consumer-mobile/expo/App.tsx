@@ -1,12 +1,14 @@
 import React, { useState } from "react";
 import { SafeAreaView, View, Text, StyleSheet, StatusBar, Pressable, TextInput, ActivityIndicator, ScrollView } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import * as Crypto from "expo-crypto";
 import { Fingerprint, ScanLine, ShieldCheck, AlertTriangle, Info, Keyboard } from "lucide-react-native";
 
 const API = process.env.EXPO_PUBLIC_PAN_API_URL || "http://10.0.2.2:4000/api";
 type VerifyResult = { status:string; title:string; message:string; product?:{name:string;brand?:string|null;manufacturer:string;batchCode:string;category?:string|null;productionDate?:string|null;expiryDate?:string|null;packaging?:{identityLevel:string;cartonCode?:string|null;containedUnitCount?:number|null};regulatoryReferences?:{nafdacRegistrationNumber?:string|null;sonCertificateNumber?:string|null;source:string}}; checkedAt?:string; scansRecorded?:number };
 
 export default function App() {
+  const [scanSession]=useState(()=>Crypto.randomUUID());
   const [permission,requestPermission]=useCameraPermissions();
   const [scanning,setScanning]=useState(false);
   const [loading,setLoading]=useState(false);
@@ -29,7 +31,7 @@ export default function App() {
       setReportRef(tokenMatch?{token:tokenMatch[1]}:publicCode?{code:publicCode}:null);setShowReport(false);setReportNotice("");
       const url=tokenMatch?API+"/v1/verify/"+tokenMatch[1]:publicCode?API+"/v1/verify/code/"+encodeURIComponent(publicCode):"";
       if(!url) throw new Error("This QR code is not a recognised PAN product identity.");
-      const response=await fetch(url);const data=await response.json();
+      const response=await fetch(url,{headers:{"X-PAN-Scan-Session":scanSession}});const data=await response.json();
       if(!response.ok) throw new Error(data.message||"We could not verify this identity.");
       setResult(data);
     } catch(e:any) { setError(e.message||"Verification is temporarily unavailable. Please try again."); }

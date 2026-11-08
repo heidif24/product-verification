@@ -17,6 +17,8 @@ enum MembershipRole {
   ADMIN
   OPERATOR
   ANALYST
+  FINANCE
+  SUPPORT
 }
 enum ProductStatus {
   DRAFT
@@ -24,6 +26,8 @@ enum ProductStatus {
   ARCHIVED
 }
 enum IdentityStatus {
+  GENERATED
+  EXPORTED
   ACTIVE
   QUARANTINED
   REVOKED
@@ -50,6 +54,18 @@ enum IssuanceJobStatus {
   COMPLETED
   FAILED
   EXPIRED
+}
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+}
+enum WalletEntryType {
+  PAYMENT_CREDIT
+  PROMOTION_CREDIT
+  ADMIN_ADJUSTMENT
+  ISSUANCE_DEBIT
+  ISSUANCE_REFUND
 }
 
 model User {
@@ -81,6 +97,8 @@ model Manufacturer {
   documents          ManufacturerDocument[]
   invitations        Invitation[]
   issuanceJobs       IssuanceJob[]
+  walletEntries      WalletEntry[]
+  payments           Payment[]
   createdAt          DateTime               @default(now())
   updatedAt          DateTime               @updatedAt
 }
@@ -194,6 +212,7 @@ model ProductIdentity {
   batchId           String
   publicCode        String         @unique
   tokenHash         String         @unique
+  issuanceJobId     String?
   level             IdentityLevel  @default(UNIT)
   parentId          String?
   status            IdentityStatus @default(ACTIVE)
@@ -203,12 +222,15 @@ model ProductIdentity {
   batch             Batch          @relation(fields: [batchId], references: [id], onDelete: Cascade)
   carton            ProductIdentity? @relation("IdentityPackaging", fields: [parentId], references: [id], onDelete: SetNull)
   containedUnits    ProductIdentity[] @relation("IdentityPackaging")
+  issuanceJob       IssuanceJob?   @relation(fields: [issuanceJobId], references: [id], onDelete: SetNull)
   reports           ConsumerReport[]
   events            VerificationEvent[]
+  scanSessions      ScanSession[]
   issuedAt          DateTime       @default(now())
   @@index([batchId, status])
   @@index([parentId])
   @@index([batchId, level])
+  @@index([issuanceJobId, status])
 }
 
 model IssuanceJob {
@@ -227,18 +249,35 @@ model IssuanceJob {
   updatedAt           DateTime          @updatedAt
   manufacturer        Manufacturer      @relation(fields: [manufacturerId], references: [id], onDelete: Cascade)
   batch               Batch             @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  identities          ProductIdentity[]
   @@index([manufacturerId, createdAt])
   @@index([status, createdAt])
 }
 
 model VerificationEvent {
-  id         String          @id @default(cuid())
-  identityId String?
-  outcome    String
-  identity   ProductIdentity? @relation(fields: [identityId], references: [id], onDelete: SetNull)
-  createdAt  DateTime        @default(now())
+  id            String          @id @default(cuid())
+  identityId    String?
+  outcome       String
+  sessionHash   String?
+  sessionDate   DateTime?       @db.Date
+  isIndependent Boolean         @default(true)
+  riskLevel     String          @default("NORMAL")
+  identity      ProductIdentity? @relation(fields: [identityId], references: [id], onDelete: SetNull)
+  createdAt     DateTime        @default(now())
   @@index([identityId, createdAt])
+  @@index([identityId, sessionDate, riskLevel])
   @@index([createdAt])
+}
+
+model ScanSession {
+  id          String         @id @default(cuid())
+  identityId  String
+  sessionHash String
+  sessionDate DateTime       @db.Date
+  firstSeenAt DateTime       @default(now())
+  identity    ProductIdentity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  @@unique([identityId, sessionHash, sessionDate])
+  @@index([identityId, sessionDate])
 }
 
 model ConsumerReport {
@@ -248,6 +287,11 @@ model ConsumerReport {
   reason       String
   details      String
   contactEmail String?
+  storeName    String?
+  city         String?
+  state        String?
+  purchaseDate DateTime?
+  evidenceKeys String[]        @default([])
   status       String          @default("OPEN")
   adminNote    String?
   createdAt    DateTime        @default(now())
@@ -272,13 +316,69 @@ model PrivacyRequest {
 }
 
 model AuditLog {
-  id         String   @id @default(cuid())
-  actor      String
-  action     String
-  targetType String
-  targetId   String
-  reason     String
-  createdAt  DateTime @default(now())
+  id          String   @id @default(cuid())
+  sequence    BigInt   @unique @default(autoincrement())
+  actor       String
+  action      String
+  targetType  String
+  targetId    String
+  reason      String
+  previousHash String?
+  entryHash   String?  @unique
+  metadata    Json?
+  createdAt   DateTime @default(now())
   @@index([targetType, targetId, createdAt])
   @@index([createdAt])
+}
+
+model AuditChainHead {
+  id           Int      @id @default(1)
+  lastSequence BigInt   @default(0)
+  lastHash     String?
+  updatedAt    DateTime @updatedAt
+}
+
+model CreditPackage {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  credits     Int
+  amountMinor Int
+  currency    String    @default("NGN")
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  payments    Payment[]
+  @@index([active, createdAt])
+}
+
+model Payment {
+  id                String        @id @default(cuid())
+  manufacturerId    String
+  packageId         String
+  provider          String        @default("PAYSTACK")
+  reference         String        @unique
+  providerReference String?
+  status            PaymentStatus @default(PENDING)
+  amountMinor       Int
+  currency          String        @default("NGN")
+  credits           Int
+  createdAt         DateTime      @default(now())
+  paidAt            DateTime?
+  manufacturer      Manufacturer  @relation(fields: [manufacturerId], references: [id], onDelete: Cascade)
+  package           CreditPackage @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  @@index([manufacturerId, createdAt])
+  @@index([status, createdAt])
+}
+
+model WalletEntry {
+  id             String         @id @default(cuid())
+  manufacturerId String
+  amountCredits  Int
+  type           WalletEntryType
+  idempotencyKey String         @unique
+  actorId        String?
+  reason         String
+  createdAt      DateTime       @default(now())
+  manufacturer   Manufacturer   @relation(fields: [manufacturerId], references: [id], onDelete: Restrict)
+  @@index([manufacturerId, createdAt])
 }

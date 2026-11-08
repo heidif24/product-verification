@@ -1,7 +1,8 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Fingerprint, ShieldCheck, ScanLine, ArrowUpRight, Info } from "lucide-react";
+import { Fingerprint, ShieldCheck, ScanLine, ArrowUpRight, Info, AppWindow } from "lucide-react";
+import "./app-download.css";
 
 export default function VerifyHome() {
   const [code,setCode]=useState(""); const router=useRouter();
@@ -17,6 +18,7 @@ export default function VerifyHome() {
         <label htmlFor="identity">ENTER A PRODUCT ID</label><div><input id="identity" value={code} onChange={e=>setCode(e.target.value)} placeholder="e.g. PANU-0123456789ABCDEF0123" required/><button type="submit">Verify <ArrowUpRight size={15}/></button></div><small>Enter the PAN identity printed beside the QR code.</small>
       </form>
       <div className="verify-note"><Info size={16}/><span>A PAN identity helps you check a product record. It is not, by itself, a laboratory test or a guarantee of the physical contents.</span></div>
+      <div className="app-download-prompt"><span><AppWindow size={16}/> Prefer the PAN app?</span><a href="/download">Get PAN Verify for your phone <ArrowUpRight size={14}/></a></div>
     </section>
     <footer className="verify-footer"><span>© 2026 Product Authentication Network</span><span><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · Built for trust.</span></footer>
   </main>;
