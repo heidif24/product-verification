@@ -15,7 +15,13 @@ The artifact is an installable Android debug APK. It is suitable for internal QA
 
 ## EAS builds for distribution
 
-The repository includes EAS profiles in `eas.json`. First configure an Expo account/project and link this app with EAS:
+The repository includes EAS profiles in `eas.json`:
+
+- `development` — dev client
+- `preview` — internal distribution APK / IPA
+- `production` — Play Store App Bundle + App Store IPA (`autoIncrement: true`)
+
+### One-time setup
 
 ```bash
 cd apps/consumer-mobile
@@ -23,24 +29,56 @@ pnpm exec eas login
 pnpm exec eas build:configure
 ```
 
-Set `EXPO_PUBLIC_PAN_API_URL` in the EAS environment to the deployed PAN API base URL, including the `/api` prefix (for example, `https://api.your-domain.ng/api`). Do not use `10.0.2.2` for a physical phone or public release.
+Link the Expo project and create the production credentials (Android keystore + Apple certificates/profiles).
 
-Build an installable Android APK:
+### Environment
 
-```bash
-EXPO_PUBLIC_PAN_API_URL=https://YOUR-API-HOST/api pnpm exec eas build --platform android --profile preview
+Set `EXPO_PUBLIC_PAN_API_URL` in the EAS environment (or secret) to the **production** API base URL including the `/api` prefix, for example:
+
+```
+https://api.pan.example.ng/api
 ```
 
-Build an iOS IPA for internal distribution:
+Never use the emulator-only `10.0.2.2` address for physical devices or store builds.
+
+### Build commands
+
+Internal / QA Android APK:
 
 ```bash
-EXPO_PUBLIC_PAN_API_URL=https://YOUR-API-HOST/api pnpm exec eas build --platform ios --profile preview
+pnpm exec eas build --platform android --profile preview
 ```
 
-EAS will request or use the Apple Distribution certificate and provisioning profile needed to sign an IPA. An Apple Developer Program account is required for normal device installation and distribution. For App Store submission, use the `production` profile.
+Production Android App Bundle (Play Store):
+
+```bash
+pnpm exec eas build --platform android --profile production
+```
+
+Production iOS (requires Apple Developer Program):
+
+```bash
+pnpm exec eas build --platform ios --profile production
+```
+
+### Store submission checklist
+
+- [ ] Privacy Policy URL (counsel-approved) linked in both stores
+- [ ] Support contact and legal entity details correct
+- [ ] Screenshots and store listing copy do **not** claim that a scan proves physical authenticity, NAFDAC registration, or product quality
+- [ ] `NEXT_PUBLIC_ANDROID_DOWNLOAD_URL` and `NEXT_PUBLIC_IOS_DOWNLOAD_URL` updated on the public verification website after listing goes live
+- [ ] Production API URL confirmed in the built binary (no preview/staging URLs)
 
 ## What CI does and does not prove
 
 The emulator test verifies the built Android app can launch, accept a PAN code, call the API over the emulator-to-host network, and render the returned product. The API smoke suite separately exercises registration, issuance, carton/unit relationships, verification, reporting and administration.
 
-This is not a substitute for testing on physical Android models and real network conditions. An iOS IPA build and iPhone/iPad device test require EAS/Apple signing credentials and access to an iOS device. A public release also requires a production API URL, HTTPS, production secrets, and a production database.
+This is **not** a substitute for testing on physical Android models and real network conditions. An iOS IPA build and iPhone/iPad device test require EAS/Apple signing credentials and access to an iOS device. A public release also requires a production API URL, HTTPS, production secrets, and a production database.
+
+## Required physical device matrix (before market launch)
+
+- At least three Android devices across different major versions / manufacturers (e.g. Samsung, Tecno/Infinix, Pixel or equivalent).
+- At least one recent iPhone.
+- Tests performed on mobile data (not only Wi-Fi).
+- Confirm camera QR scan + manual code entry both succeed against production identities.
+- Confirm error states (invalid code, revoked, quarantined) render correctly and never over-claim authenticity.
