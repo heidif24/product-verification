@@ -16,7 +16,8 @@
     "react-dom": "^19.0.0",
     "jszip": "^3.10.1",
     "qrcode": "^1.5.4",
-    "jspdf": "^2.5.2"
+    "jspdf": "^2.5.2",
+    "bwip-js": "^4.5.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
