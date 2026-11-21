@@ -19,6 +19,10 @@ The NestJS API and PostgreSQL database are shared infrastructure, not a fourth u
 - Bulk issuance is queued in the API worker. Export payloads are encrypted at rest and have a limited retrieval window.
 - Exports include QR PNGs, a CSV manifest and a print-ready PDF label sheet.
 
+## Production readiness
+
+The current full-stack release decision and outstanding deployment/security gates are tracked in [the November 2026 production readiness audit](docs/PRODUCTION-READINESS-AUDIT-2026-11.md) and [the master production TODO](docs/PRODUCTION-TODO.md). The project is not approved for public production launch until those gates are closed.
+
 ## PAN barcode format
 
 New product and carton labels use the PAN1 app-oriented Data Matrix format. The optical symbol uses the established Data Matrix standard; its versioned PAN1 payload is interpreted by the PAN consumer app and is not a direct web URL. Legacy QR and manual-code verification remain supported. See [PAN barcode specification](docs/PAN-BARCODE-SPEC.md) for security, printing and release requirements.
