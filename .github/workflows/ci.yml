@@ -27,6 +27,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://pan:pan_local_password@localhost:5432/pan?schema=public
       NODE_ENV: test
+      PAN_EXPOSE_TEST_TOKENS: "true"
       JWT_SECRET: ci-only-jwt-secret-0123456789-abcdefghijklmnopqrstuvwxyz
       TOKEN_PEPPER: ci-only-token-pepper-0123456789-abcdefghijklmnopqrstuvwxyz
       AUDIT_HMAC_KEY: ci-only-audit-key-0123456789-abcdefghijklmnopqrstuvwxyz
