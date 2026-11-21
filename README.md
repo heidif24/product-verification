@@ -19,6 +19,10 @@ The NestJS API and PostgreSQL database are shared infrastructure, not a fourth u
 - Bulk issuance is queued in the API worker. Export payloads are encrypted at rest and have a limited retrieval window.
 - Exports include QR PNGs, a CSV manifest and a print-ready PDF label sheet.
 
+## PAN barcode format
+
+New product and carton labels use the PAN1 app-oriented Data Matrix format. The optical symbol uses the established Data Matrix standard; its versioned PAN1 payload is interpreted by the PAN consumer app and is not a direct web URL. Legacy QR and manual-code verification remain supported. See [PAN barcode specification](docs/PAN-BARCODE-SPEC.md) for security, printing and release requirements.
+
 ## What PAN says — and does not say
 
 A successful PAN result means the code matches an active digital identity issued under the named producer's PAN workspace. It does not independently prove that the physical item was made by that producer, that the contents are genuine, safe or of a particular quality, or that the product is registered or approved by NAFDAC, SON or another regulator.
