@@ -1,9 +1,8 @@
-import { Body, Controller, Get, Param, Post, Req, Headers, UseGuards, BadRequestException, NotFoundException, ConflictException, ForbiddenException } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Req, Headers, UseGuards, BadRequestException, NotFoundException, ConflictException, ForbiddenException, GoneException } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { Throttle } from "@nestjs/throttler";
 import { createHmac, randomBytes } from "node:crypto";
 import * as bcrypt from "bcryptjs";
-import * as QRCode from "qrcode";
 import { PrismaService } from "./prisma.service";
 import { AuthGuard, AuthRequest, Public } from "./auth";
 import { sendPanEmail } from "./mailer";
@@ -275,41 +274,11 @@ export class AppController {
     }
   }
 
+  // Retired legacy route: all new identities must use the encrypted asynchronous Code Studio workflow.
   @Post("v1/batches/:id/identities")
   @UseGuards(AuthGuard)
-  async issue(@Req() req: AuthRequest, @Param("id") id: string, @Body() body: { quantity?: number }) {
-    await this.assertWorkspaceRole(req, ["OWNER", "ADMIN", "OPERATOR"]);
-    const producer = await this.db.manufacturer.findUnique({ where: { id: req.user.manufacturerId }, select: { status: true } });
-    if (producer?.status !== "APPROVED") throw new ForbiddenException("Your PAN producer workspace must be approved before issuing product identities.");
-    const batch = await this.db.batch.findFirst({ where: { id, product: { manufacturerId: req.user.manufacturerId } }, include: { product: true } });
-    if (!batch) throw new NotFoundException("Batch not found");
-    const quantity = Number(body.quantity);
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 250) throw new BadRequestException("Issue between 1 and 250 identities per request.");
-    const pepper = process.env.TOKEN_PEPPER;
-    if (!pepper || pepper.length < 32) throw new Error("TOKEN_PEPPER must be set to at least 32 characters.");
-    const baseUrl = (process.env.PUBLIC_VERIFY_URL || "http://localhost:3001").replace(/\/$/, "");
-    const records = Array.from({ length: quantity }, () => {
-      const token = randomBytes(32).toString("base64url");
-      const publicCode = "PAN-" + randomBytes(10).toString("hex").toUpperCase();
-      return { token, publicCode, tokenHash: tokenDigest(token) };
-    });
-    const assets = await Promise.all(records.map(async r => {
-      const verifyUrl = baseUrl + "/v/" + r.token;
-      return { code: r.publicCode, verifyUrl, qrDataUrl: await QRCode.toDataURL(verifyUrl, { errorCorrectionLevel: "H", margin: 2, width: 320, color: { dark: "#173B32", light: "#FFFFFF" } }) };
-    }));
-    const created = await this.db.$transaction(async tx => {
-      const alreadyIssued = await tx.productIdentity.count({ where: { batchId: id } });
-      if (alreadyIssued + quantity > batch.quantity) {
-        throw new BadRequestException(`This batch contains ${batch.quantity} units; ${alreadyIssued} identities have already been issued.`);
-      }
-      const wallet = await tx.walletEntry.aggregate({ where: { manufacturerId: req.user.manufacturerId }, _sum: { amountCredits: true } });
-      if ((wallet._sum.amountCredits || 0) < quantity) throw new BadRequestException(`Insufficient code credits. ${quantity} credits are required for this issuance.`);
-      const result = await tx.productIdentity.createMany({ data: records.map(r => ({ batchId: id, publicCode: r.publicCode, tokenHash: r.tokenHash, status: "EXPORTED" })) });
-      await tx.walletEntry.create({ data: { manufacturerId: req.user.manufacturerId, amountCredits: -quantity, type: "ISSUANCE_DEBIT", idempotencyKey: "direct-issuance:" + randomBytes(18).toString("hex"), actorId: req.user.sub, reason: `${quantity} credits charged for direct identity export.` } });
-      await appendAudit(tx, { actor: req.user.sub, action: "DIRECT_IDENTITY_EXPORT", targetType: "BATCH", targetId: id, reason: `${quantity} identities exported and ${quantity} credits charged.` });
-      return result;
-    }, { isolationLevel: "Serializable" });
-    return { issued: created.count, batch: { id: batch.id, batchCode: batch.batchCode }, product: { name: batch.product.name, brand: batch.product.brand }, identities: assets, notice: "Each QR identity is unique. Keep this export secure: verification URLs contain bearer tokens." };
+  async legacyDirectIssuance() {
+    throw new GoneException("Direct QR issuance has been retired. Use Manufacturer Code Studio for secure PAN1 identity issuance.");
   }
 
   @Get("v1/verify/code/:code")
