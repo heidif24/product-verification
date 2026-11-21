@@ -20,7 +20,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow PAN Verify to scan product identity QR codes."
+          "cameraPermission": "Allow PAN Verify to scan PAN product identity barcodes."
         }
       ],
       [
