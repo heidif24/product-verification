@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Activity, Building2, WalletCards } from "lucide-react";
 import "./finance-nav.css";
 
-export default function AdminLayout({ children }: { children: ReactNode }) {
+export default function AdminLayout({ children }: { children: any }) {
   return <>
     <nav className="admin-tools" aria-label="Super administrator tools">
       <span>PAN NETWORK CONTROL</span>
