@@ -2,6 +2,12 @@ packages:
   - "apps/*"
   - "packages/*"
 
+# Expo SDK 52's Gradle autolinking needs this package resolvable from the app
+# directory. Hoisting only the autolinker fixes ExpoModulesPackage's generated
+# package import while preserving pnpm's isolated node_modules layout.
+publicHoistPattern:
+  - expo-modules-autolinking
+
 allowBuilds:
   "@prisma/client": true
   "@prisma/engines": true
