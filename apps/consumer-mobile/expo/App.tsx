@@ -4,7 +4,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Crypto from "expo-crypto";
 import { Fingerprint, ScanLine, ShieldCheck, AlertTriangle, Info, Keyboard } from "lucide-react-native";
 
-const API = process.env.EXPO_PUBLIC_PAN_API_URL || "http://10.0.2.2:4000/api";
+const API = process.env.EXPO_PUBLIC_PAN_API_URL || (process.env.NODE_ENV === "development" ? "http://10.0.2.2:4000/api" : "");
 type VerifyResult = { status:string; title:string; message:string; product?:{name:string;brand?:string|null;manufacturer:string;batchCode:string;category?:string|null;productionDate?:string|null;expiryDate?:string|null;packaging?:{identityLevel:string;cartonCode?:string|null;containedUnitCount?:number|null};regulatoryReferences?:{nafdacRegistrationNumber?:string|null;sonCertificateNumber?:string|null;source:string}}; checkedAt?:string; scansRecorded?:number };
 
 export default function App() {
@@ -26,6 +26,7 @@ export default function App() {
   async function verify(value:string) {
     setScanning(false);setLoading(true);setError("");setResult(null);
     try {
+      if(!API) throw new Error("PAN Verify is not configured for this build. Please contact PAN support.");
       const panPayload=value.match(/^PAN1:([A-Za-z0-9_-]{40,60})$/);
       const tokenMatch=panPayload || value.match(/\/v\/([A-Za-z0-9_-]{30,60})/);
       const publicCode=value.match(/PAN(?:U|C)?-[A-Fa-f0-9]{20}/i)?.[0] || (/^PAN(?:U|C)?-/i.test(value)?value:"");
