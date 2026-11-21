@@ -2,9 +2,8 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/commo
 import { createCipheriv, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { PrismaService } from "./prisma.service";
 import { appendAudit } from "./audit";
-import * as QRCode from "qrcode";
 
-type ExportAsset = { code: string; level: "UNIT" | "CARTON"; verifyUrl: string; parentCode: string | null };
+type ExportAsset = { code: string; level: "UNIT" | "CARTON"; verifyUrl: string; scanPayload: string; parentCode: string | null };
 const digest = (token: string) => createHmac("sha256", process.env.TOKEN_PEPPER!).update(token).digest("hex");
 function encrypt(value: unknown) {
   const raw = process.env.EXPORT_ENCRYPTION_KEY || "";
@@ -48,7 +47,7 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
         cartons.push({ id: randomUUID(), code, token });
       }
       if (cartons.length) {
-        cartons.forEach(c => assets.push({ code: c.code, level: "CARTON", verifyUrl: baseUrl + "/v/" + c.token, parentCode: null }));
+        cartons.forEach(c => assets.push({ code: c.code, level: "CARTON", verifyUrl: baseUrl + "/v/" + c.token, scanPayload: "PAN1:" + c.token, parentCode: null }));
       }
       const existingUnitsToLink = job.cartonQuantity > 0 && job.unitQuantity === 0 ? await this.db.productIdentity.findMany({ where: { batchId: job.batchId, level: "UNIT", parentId: null }, select: { id: true }, orderBy: { issuedAt: "asc" }, take: job.cartonQuantity * (job.batch.unitsPerCarton || 0) }) : [];
       if (job.cartonQuantity > 0 && job.unitQuantity === 0 && existingUnitsToLink.length !== job.cartonQuantity * (job.batch.unitsPerCarton || 0)) throw new Error("Not enough unassigned unit identities remain for carton linking.");
@@ -59,7 +58,7 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
         const cartonIndex = job.cartonQuantity > 0 ? Math.floor(i / Math.max(1, job.batch.unitsPerCarton || 1)) : -1;
         const carton = cartonIndex >= 0 ? cartons[Math.min(cartonIndex, cartons.length - 1)] : undefined;
         unitRecords.push({ batchId: job.batchId, publicCode: code, tokenHash: digest(token), issuanceJobId: jobId, level: "UNIT", parentId: carton?.id || null });
-        unitAssets.push({ code, level: "UNIT", verifyUrl: baseUrl + "/v/" + token, parentCode: carton?.code || null });
+        unitAssets.push({ code, level: "UNIT", verifyUrl: baseUrl + "/v/" + token, scanPayload: "PAN1:" + token, parentCode: carton?.code || null });
       }
       await this.db.issuanceJob.update({ where: { id: jobId }, data: { progress: 25 } });
       assets.push(...unitAssets);
