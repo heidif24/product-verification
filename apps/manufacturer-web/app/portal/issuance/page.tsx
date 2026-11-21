@@ -1,6 +1,6 @@
 "use client";
 import { useEffect,useMemo,useState, type FormEvent } from "react";
-import bwipjs from "bwip-js";
+import bwipjs from "@bwip-js/browser";
 import JSZip from "jszip";
 import { jsPDF } from "jspdf";
 import "../ops.css";
