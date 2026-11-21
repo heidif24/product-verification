@@ -13,10 +13,13 @@ This document is the single source of truth. Every critical gap identified in `P
 
 ## 0. Branch & Process Hygiene (Completed in this PR)
 
-- [x] Create dedicated branch `feat/production-market-ready`
+- [x] Continue production hardening on `feat/pan-proprietary-barcode` (PR #7); original readiness work remains in the repository history.
 - [x] Expand `IdentityStatus` enum with full lifecycle states + migration
 - [x] Add retention / deletion job skeleton + documented schedule
 - [x] Add ops runbooks (incident, backup/restore, on-call)
+- [x] Add PAN1 Data Matrix protocol, manufacturer label generation and mobile/browser scanning with legacy QR compatibility.
+- [x] Retire direct legacy issuance; route new issuance through encrypted asynchronous Code Studio.
+- [x] Add session-aware scan accounting, manufacturer batch recall and guarded lifecycle transitions.
 - [x] Improve mobile release & EAS production profiles
 - [x] Add production environment variable templates and validation notes
 - [x] Strengthen privacy notice / terms drafts with NDPA-oriented structure (still require counsel)
@@ -150,8 +153,8 @@ Web / Mobile:
 ### 4.1 Identity Lifecycle (Implemented in this branch)
 - [x] Expand `IdentityStatus` to: `GENERATED | EXPORTED | PRINTED | QUALITY_CHECKED | ACTIVE | QUARANTINED | REVOKED | RECALLED | BLOCKED | DESTROYED | CANCELLED`
 - [x] Migration added.
-- [ ] Wire UI and API transitions for the new states (print attestation already exists; extend for recall / destroy / block).
-- [ ] Manufacturer and super-admin actions for recall and market withdrawal.
+- [x] Wire UI and API transitions for quarantine, release, revoke, recall, block, destroy and cancel.
+- [x] Manufacturer batch recall and super-admin market-withdrawal actions.
 
 ### 4.2 Wallet & Payments
 - [x] Append-only ledger + transactional debit/refund already present.
@@ -159,14 +162,14 @@ Web / Mobile:
 - [ ] Harden duplicate-company / duplicate-payment prevention before public sales.
 
 ### 4.3 Scan Risk & Reporting
-- [x] Session-hash based risk flagging present.
-- [ ] Distributed rate-limit storage if running multiple API instances.
+- [x] Session-hash based risk flagging present; scan metrics require a first-party scan session and unknown tokens do not create event rows.
+- [ ] Distributed rate-limit storage and trusted-proxy configuration before running multiple API instances.
 - [ ] Alert delivery channel (email/Slack) for elevated risk.
 - [ ] Photo evidence upload + malware scan path for consumer reports.
 
 ### 4.4 Other
 - [ ] Product image upload support (optional for v1).
-- [ ] Full market / recall lifecycle screens.
+- [x] Manufacturer batch recall control and super-admin lifecycle actions; [ ] complete customer-facing market/recall support workflows and notifications.
 
 ---
 
@@ -189,7 +192,8 @@ See `apps/consumer-mobile/RELEASE-AND-DEVICE-TESTING.md` (updated).
 ## 6. Acceptance, Load & Pilot
 
 ### 6.1 Automated Acceptance (CI already covers baseline)
-- [x] Typecheck, API smoke, web builds, Android emulator journey.
+- [x] CI workflows for typecheck, API smoke, web builds and Android emulator journey exist.
+- [ ] Re-run and obtain a green result for the complete suite on the final production-candidate commit.
 - [ ] Add dedicated load / concurrency suite for 10 000+ identity issuance, worker restart recovery, and carton-unit reconciliation (can be a separate workflow or script).
 
 ### 6.2 Manual / Operational Acceptance
@@ -217,7 +221,7 @@ Only when all of the above are checked may the system be declared production / m
 
 ## 7. Bottom Line & Recommended Sequence
 
-**Current state (after this PR):** Strong application foundation + complete, actionable master plan + key code expansions (identity lifecycle, retention skeleton, ops docs, mobile release improvements). Still **not** production-ready until infrastructure, secrets, legal review, security testing, mobile store releases and physical pilot are completed.
+**Current state (after this PR):** Strong application foundation plus PAN1 barcode, first-party customer scanning, unified issuance, session-aware scan accounting and identity recall/lifecycle controls. The full-stack audit is in `docs/PRODUCTION-READINESS-AUDIT-2026-11.md`. Still **not** production-ready until the critical security controls, green final CI, infrastructure, secrets, legal review, mobile releases and physical pilot are completed.
 
 **Recommended execution order**
 
