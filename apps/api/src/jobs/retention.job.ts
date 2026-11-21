@@ -9,6 +9,7 @@
  */
 
 import { PrismaClient } from "@prisma/client";
+import { appendAudit } from "../audit";
 
 const prisma = new PrismaClient();
 
@@ -69,8 +70,21 @@ export async function runRetentionJob(now = new Date()) {
   });
   results.privacyRequestsPurged = purgedPrivacy.count;
 
-  // Always record that the job ran (use existing audit machinery in production wiring).
-  // await writeAudit({ actor: "system:retention", action: "RETENTION_JOB_RAN", ... });
+  await prisma.$transaction(async tx => {
+    await appendAudit(tx, {
+      actor: "SYSTEM:RETENTION",
+      action: "RETENTION_JOB_COMPLETED",
+      targetType: "RETENTION_RUN",
+      targetId: now.toISOString(),
+      reason: "Scheduled retention job completed successfully.",
+      metadata: {
+        verificationEventsDeleted: results.verificationEventsDeleted,
+        exportPayloadsCleared: results.exportPayloadsCleared,
+        privacyRequestsPurged: results.privacyRequestsPurged,
+        ranAt: results.ranAt
+      }
+    });
+  });
 
   return results;
 }
