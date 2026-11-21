@@ -45,6 +45,12 @@ jobs:
         with:
           node-version: 22
       - run: pnpm install --no-frozen-lockfile
+      - name: Upload generated workspace lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: pan-pnpm-lockfile
+          path: pnpm-lock.yaml
+          if-no-files-found: error
       - run: pnpm --filter @pan/api typecheck
       - name: Create isolated CI super-admin password hash
         run: |
