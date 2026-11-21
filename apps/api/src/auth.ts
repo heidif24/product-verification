@@ -15,9 +15,11 @@ export class AuthGuard implements CanActivate {
     const isPublic = Reflect.getMetadata(IS_PUBLIC, context.getHandler());
     if (isPublic) return true;
     const header = req.headers.authorization;
-    if (!header?.startsWith("Bearer ")) throw new UnauthorizedException("Sign in to continue");
+    const cookieToken = req.headers.cookie?.split(";").map(part => part.trim()).find(part => part.startsWith("pan_super_admin="))?.slice("pan_super_admin=".length);
+    const token = header?.startsWith("Bearer ") ? header.slice(7) : cookieToken;
+    if (!token) throw new UnauthorizedException("Sign in to continue");
     try {
-      req.user = await this.jwt.verifyAsync(header.slice(7));
+      req.user = await this.jwt.verifyAsync(token);
     } catch {
       throw new UnauthorizedException("Your session has expired. Please sign in again.");
     }
