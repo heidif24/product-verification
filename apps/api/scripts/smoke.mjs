@@ -231,6 +231,19 @@ const restoration = await request("/v1/super-admin/companies/" + workspaceId + "
 assert(restoration.status === 201 && restoration.data.status === "APPROVED", "super administrator should restore a manufacturer workspace");
 const restoredAccess = await request("/v1/products", { token: newLogin.data.accessToken });
 assert(restoredAccess.status === 200, "restored manufacturer sessions should regain protected API access");
+const batchRecall = await request("/v1/manufacturer/batches/" + batch.data.id + "/recall", { method: "POST", token: newLogin.data.accessToken, body: { reason: "Smoke test validates manufacturer initiated batch recall." } });
+assert(batchRecall.status === 201 && batchRecall.data.recalled > 0, "manufacturer owner should be able to recall active identities in its own batch");
+const recalledCheck = await request("/v1/verify/" + unitToken, { scanSession: "60000000-0000-4000-8000-000000000001" });
+assert(recalledCheck.status === 200 && recalledCheck.data.status === "RECALLED", "consumer verification must clearly report a recalled identity");
+const recalledIdentitySearch = await request("/v1/super-admin/identities?q=" + encodeURIComponent(units[1].code), { token: adminLogin.data.accessToken });
+assert(recalledIdentitySearch.status === 200 && recalledIdentitySearch.data.length > 0, "super administrator should locate recalled identities");
+const destroyed = await request("/v1/super-admin/identities/" + recalledIdentitySearch.data[0].id + "/destroy", { method: "POST", token: adminLogin.data.accessToken, body: { reason: "Smoke test confirms destruction is a terminal lifecycle state." } });
+assert(destroyed.status === 201 && destroyed.data.status === "DESTROYED", "super administrator should destroy a recalled identity");
+const invalidRelease = await request("/v1/super-admin/identities/" + recalledIdentitySearch.data[0].id + "/release", { method: "POST", token: adminLogin.data.accessToken, body: { reason: "This transition must be rejected after destruction." } });
+assert(invalidRelease.status === 409, "destroyed identities must not be reactivated");
+const destroyedCheck = await request("/v1/verify/" + unitToken, { scanSession: "60000000-0000-4000-8000-000000000002" });
+assert(destroyedCheck.status === 200 && destroyedCheck.data.status === "DESTROYED", "consumer verification must report destroyed identities accurately");
+
 
 console.log("PAN end-to-end smoke passed: email verification, password recovery/session revocation, facilities, invitations/RBAC, product/batch, carton-unit issuance, secure export retrieval, verification hierarchy, regulatory disclaimers, quantity guards, analytics, audit and super-admin login.");
 console.log("PAN_MOBILE_SMOKE_CODE=" + units[1].code);
