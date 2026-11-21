@@ -193,7 +193,7 @@ export class SuperAdminController {
   async identityAction(@Param("id") id: string, @Param("action") action: string, @Body() body: { reason?: string }) {
     const transitions: Record<string, { to: "ACTIVE" | "QUARANTINED" | "REVOKED" | "RECALLED" | "BLOCKED" | "DESTROYED" | "CANCELLED"; from: string[] }> = {
       release: { to: "ACTIVE", from: ["QUARANTINED"] },
-      quarantine: { to: "QUARANTINED", from: ["GENERATED", "EXPORTED", "PRINTED", "QUALITY_CHECKED", "ACTIVE"] },
+      quarantine: { to: "QUARANTINED", from: ["ACTIVE"] },
       revoke: { to: "REVOKED", from: ["GENERATED", "EXPORTED", "PRINTED", "QUALITY_CHECKED", "ACTIVE", "QUARANTINED", "RECALLED", "BLOCKED"] },
       recall: { to: "RECALLED", from: ["ACTIVE", "QUARANTINED", "BLOCKED"] },
       block: { to: "BLOCKED", from: ["EXPORTED", "PRINTED", "QUALITY_CHECKED", "ACTIVE"] },
