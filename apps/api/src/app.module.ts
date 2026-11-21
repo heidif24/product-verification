@@ -9,13 +9,14 @@ import { IssuanceWorker } from "./issuance.worker";
 import { ManufacturerOperationsController, SuperAdminAuthController, SuperAdminController, SuperAdminGuard } from "./operations.controller";
 import { ConsumerReportController, PrivacyRequestController } from "./reports.controller";
 import { PAYMENT_PROVIDER, PaystackPaymentProvider } from "./payments.service";
+import { PaystackWebhookController } from "./paystack-webhook.controller";
 
 @Module({
   imports: [
     JwtModule.register({ secret: process.env.JWT_SECRET!, signOptions: { expiresIn: "12h" } }),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 120 }])
   ],
-  controllers: [AppController, ManufacturerOperationsController, SuperAdminAuthController, SuperAdminController, ConsumerReportController, PrivacyRequestController],
+  controllers: [AppController, ManufacturerOperationsController, SuperAdminAuthController, SuperAdminController, ConsumerReportController, PrivacyRequestController, PaystackWebhookController],
   providers: [
     PrismaService, IssuanceWorker, SuperAdminGuard, PaystackPaymentProvider,
     { provide: PAYMENT_PROVIDER, useExisting: PaystackPaymentProvider },
