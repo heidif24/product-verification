@@ -24,8 +24,6 @@ export class AppController {
 
   private async recordIdentityScan(identityId: string, initialOutcome: string, sessionId: string | undefined, now: Date, currentCount: number) {
     const sessionHash = scanSessionDigest(sessionId);
-    // Requests without a valid first-party scan session may still verify an identity,
-    // but must not inflate scan metrics or create unbounded event rows.
     if (!sessionHash) return { outcome: initialOutcome, independent: false, duplicate: false, scansRecorded: currentCount, sessionCount: 0 };
     const sessionDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     return this.db.$transaction(async tx => {
