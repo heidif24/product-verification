@@ -43,7 +43,7 @@ This is an engineering review of the repository and the connected Vercel project
 6. **Issuance worker supervision needs a distributed lease/heartbeat.** The worker is in-process and uses stale-job recovery. Before horizontal scaling, add a renewable job lease or move processing to a dedicated queue/worker with safe restart and duplicate-processing tests.
 7. **Payment operations need a verified Paystack webhook path.** The current user-return verification path is useful, but production settlement must also handle signed provider webhooks, retries and idempotent crediting.
 8. **Retention and privacy workflows are incomplete.** The retention job is a skeleton and is not scheduled. Privacy requests are collected but require identity verification, operational ownership, completion evidence and deletion/retention execution.
-9. **Dependency installation is not reproducible yet.** The main branch has no committed `pnpm-lock.yaml`; CI and Vercel use `--no-frozen-lockfile`. Generate and commit the workspace lockfile, then require frozen installs.
+9. **Dependency reproducibility is fixed on this branch, but main is not yet updated.** This branch now commits `pnpm-lock.yaml`; the quality CI workflow and Vercel project use frozen installs. The Android emulator workflow still uses `--no-frozen-lockfile` and should be aligned before merge.
 
 ### High — complete before broad launch
 
@@ -68,9 +68,9 @@ This is an engineering review of the repository and the connected Vercel project
 
 ## Verification evidence at audit time
 
-- The manufacturer Vercel preview initially failed on React type incompatibility and then on the Data Matrix package import. The branch was updated to use the browser-specific BWIP package and shared React namespace types. The latest preview build was still pending at the time this report was written; a successful build is not claimed here.
-- A previous Android workflow run reached and passed API typecheck and Prisma deployment after an earlier syntax repair, but was cancelled before the full smoke and emulator journey completed.
-- The full CI suite for the latest branch head, including API smoke, manufacturer web, public verification web and mobile typecheck, still needs a completed green run.
+- The manufacturer Vercel preview initially failed on React type incompatibility and then on the Data Matrix package import. The branch was updated to use the browser-specific BWIP package and shared React namespace types. The manufacturer preview build subsequently completed successfully; the preview uses the frozen workspace lockfile and is not a production deployment.
+- The latest quality CI run passed API typecheck, Prisma deployment, end-to-end API smoke, manufacturer/verification/mobile typechecks, API build and both web builds. The separate Android workflow has passed its API typecheck, Prisma deployment and smoke test; its debug APK build and emulator journey are still in progress.
+- The full quality CI suite for the latest tested branch head is green. The Android emulator workflow remains pending, and the latest lockfile/CI configuration changes should be re-run together before merge.
 - No physical-device, printer, load, independent security or production restore test has been performed in this audit.
 
 ## Go-live acceptance gate
