@@ -235,7 +235,7 @@ const batchRecall = await request("/v1/manufacturer/batches/" + batch.data.id + 
 assert(batchRecall.status === 201 && batchRecall.data.recalled > 0, "manufacturer owner should be able to recall active identities in its own batch");
 const recalledCheck = await request("/v1/verify/" + unitToken, { scanSession: "60000000-0000-4000-8000-000000000001" });
 assert(recalledCheck.status === 200 && recalledCheck.data.status === "RECALLED", "consumer verification must clearly report a recalled identity");
-const recalledIdentitySearch = await request("/v1/super-admin/identities?q=" + encodeURIComponent(units[1].code), { token: adminLogin.data.accessToken });
+const recalledIdentitySearch = await request("/v1/super-admin/identities?q=" + encodeURIComponent(units[0].code), { token: adminLogin.data.accessToken });
 assert(recalledIdentitySearch.status === 200 && recalledIdentitySearch.data.length > 0, "super administrator should locate recalled identities");
 const destroyed = await request("/v1/super-admin/identities/" + recalledIdentitySearch.data[0].id + "/destroy", { method: "POST", token: adminLogin.data.accessToken, body: { reason: "Smoke test confirms destruction is a terminal lifecycle state." } });
 assert(destroyed.status === 201 && destroyed.data.status === "DESTROYED", "super administrator should destroy a recalled identity");
