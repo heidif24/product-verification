@@ -2,6 +2,7 @@ import { S3Client, PutObjectCommand, HeadObjectCommand, GetObjectCommand, Delete
 import { randomUUID } from "node:crypto";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { ServiceUnavailableException } from "@nestjs/common";
+import { connect } from "node:net";
 
 let client: S3Client | null = null;
 function config() {
@@ -17,6 +18,55 @@ function config() {
   });
   return { client, bucket };
 }
+
+/** Scan complete document bytes with a private ClamAV daemon using the INSTREAM protocol. */
+async function scanWithClamAv(bytes: Buffer): Promise<void> {
+  const host = process.env.CLAMAV_HOST;
+  const port = Number(process.env.CLAMAV_PORT || 3310);
+  if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new ServiceUnavailableException("Document malware scanning is not configured; uploads are temporarily unavailable.");
+  }
+  await new Promise<void>((resolve, reject) => {
+    const socket = connect({ host, port });
+    let response = "";
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      reject(error);
+    };
+    socket.setTimeout(15000, () => fail(new Error("ClamAV scan timed out.")));
+    socket.on("error", error => fail(error));
+    socket.on("data", chunk => { response += chunk.toString("utf8"); });
+    socket.on("end", () => {
+      if (settled) return;
+      settled = true;
+      if (/FOUND\s*$/.test(response)) return reject(new Error("Uploaded document was identified as malware."));
+      if (!/OK\s*$/.test(response)) return reject(new Error("ClamAV returned an invalid scan response."));
+      resolve();
+    });
+    socket.on("connect", () => {
+      socket.write(Buffer.from("zINSTREAM\\0", "ascii"));
+      const chunkSize = 64 * 1024;
+      for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+        const chunk = bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length));
+        const length = Buffer.alloc(4);
+        length.writeUInt32BE(chunk.length, 0);
+        socket.write(length);
+        socket.write(chunk);
+      }
+      const terminator = Buffer.alloc(4);
+      socket.end(terminator);
+    });
+  }).catch(error => {
+    if (error instanceof ServiceUnavailableException) throw error;
+    throw new ServiceUnavailableException(error instanceof Error && error.message.includes("malware")
+      ? "The uploaded document was quarantined because malware was detected."
+      : "The document could not be scanned safely. Please retry later.");
+  });
+}
+
 export async function createPrivateUploadUrl(key: string, mimeType: string, sizeBytes: number) {
   const { client, bucket } = config();
   const command = new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: mimeType, ContentLength: sizeBytes, Metadata: { "expected-size": String(sizeBytes) }, ServerSideEncryption: "AES256" });
@@ -25,15 +75,23 @@ export async function createPrivateUploadUrl(key: string, mimeType: string, size
 export async function confirmPrivateUpload(key: string, expectedSize: number, expectedMime: string) {
   const { client, bucket } = config();
   const head = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
-  if (!head.ContentLength || head.ContentLength !== expectedSize || head.ContentType !== expectedMime) throw new Error("Uploaded document size or content type did not match the signed upload.");
-  const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key, Range: "bytes=0-8191" }));
+  if (!head.ContentLength || head.ContentLength !== expectedSize || head.ContentType !== expectedMime || expectedSize > 10 * 1024 * 1024) {
+    throw new Error("Uploaded document size or content type did not match the signed upload.");
+  }
+  const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   const bytes = object.Body ? Buffer.from(await object.Body.transformToByteArray()) : Buffer.alloc(0);
   const isPdf = expectedMime === "application/pdf" && bytes.subarray(0, 5).toString("ascii") === "%PDF-";
   const isPng = expectedMime === "image/png" && bytes.subarray(0, 8).toString("hex") === "89504e470d0a1a0a";
   const isJpeg = expectedMime === "image/jpeg" && bytes.subarray(0, 3).toString("hex") === "ffd8ff";
-  if (!(isPdf || isPng || isJpeg)) {
+  if (bytes.length !== expectedSize || !(isPdf || isPng || isJpeg)) {
     await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
     throw new Error("The uploaded file content does not match the selected document type.");
+  }
+  try {
+    await scanWithClamAv(bytes);
+  } catch (error) {
+    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })).catch(() => undefined);
+    throw error;
   }
   return head;
 }
