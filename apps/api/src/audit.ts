@@ -48,7 +48,7 @@ function hashRecord(record: Omit<HashedAuditRecord, "entryHash">, key: string) {
 
 export async function appendAudit(tx: Prisma.TransactionClient, entry: AuditRecord) {
   const key = auditKey();
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(619847231)`;
+  await tx.$queryRaw`SELECT 1::int AS locked FROM (SELECT pg_advisory_xact_lock(619847231)) AS lock_guard`;
   await tx.$queryRaw`SELECT "id" FROM "AuditChainHead" WHERE "id" = 1 FOR UPDATE`;
   const head = await tx.auditChainHead.findUnique({ where: { id: 1 }, select: { lastHash: true } });
   if (!head) throw new Error("Audit chain head is missing; refusing to append an unanchored record.");
