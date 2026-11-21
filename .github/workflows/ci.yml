@@ -5,7 +5,7 @@ on:
   pull_request:
     branches: [main]
 concurrency:
-  group: pan-quality-checks
+  group: pan-quality-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 jobs:
   typecheck-and-smoke:
@@ -27,6 +27,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://pan:pan_local_password@localhost:5432/pan?schema=public
       NODE_ENV: test
+      PAN_EXPOSE_TEST_TOKENS: "true"
       JWT_SECRET: ci-only-jwt-secret-0123456789-abcdefghijklmnopqrstuvwxyz
       TOKEN_PEPPER: ci-only-token-pepper-0123456789-abcdefghijklmnopqrstuvwxyz
       AUDIT_HMAC_KEY: ci-only-audit-key-0123456789-abcdefghijklmnopqrstuvwxyz
@@ -38,13 +39,16 @@ jobs:
       PORT: 4000
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
       - uses: pnpm/action-setup@v4
         with:
           version: 12.16.1
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @pan/api typecheck
       - name: Create isolated CI super-admin password hash
         run: |

@@ -11,7 +11,8 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "retention:run": "ts-node --project tsconfig.json src/jobs/retention.job.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

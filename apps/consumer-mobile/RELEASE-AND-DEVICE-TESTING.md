@@ -2,6 +2,8 @@
 
 ## Android CI build
 
+The workspace keeps pnpm's isolated linker and hoists only `expo-modules-autolinking` through the root `pnpm-workspace.yaml`. This is required for Expo SDK 52's Gradle autolinking to generate `expo.modules.ExpoModulesPackage` rather than the stale `expo.core.ExpoModulesPackage` import. Do not add `expo-modules-autolinking` as a direct app dependency; keep its version controlled by the installed Expo SDK.
+
 Every push to `main` or `feat/**` and every pull request to `main` runs the consumer Android workflow. It:
 
 1. Starts an isolated PostgreSQL database and the PAN API.

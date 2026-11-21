@@ -42,7 +42,7 @@ const facility = await request("/v1/manufacturer/facilities", { method: "POST", 
 assert(facility.status === 201 && facility.data.isPrimary, "producer should register a production facility");
 
 const invite = await request("/v1/manufacturer/team/invitations", { method: "POST", token, body: { email: "analyst-" + suffix + "@pan.test", role: "ANALYST" } });
-assert(invite.status === 201 && invite.data.testInvitationToken, "owner should send a staff invitation");
+assert(invite.status === 201 && invite.data.testInvitationToken, "owner should send a staff invitation (HTTP " + invite.status + ", message: " + (invite.data.message || invite.data.error || "none") + ", test token returned: " + Boolean(invite.data.testInvitationToken) + ")");
 const accepted = await request("/v1/manufacturer/invitations/accept", { method: "POST", body: { token: invite.data.testInvitationToken, fullName: "PAN CI Analyst", password: "Analyst-test-password-2026!" } });
 assert(accepted.status === 201 && accepted.data.accepted, "invitee should accept the workspace invitation");
 const analystLogin = await request("/v1/auth/login", { method: "POST", body: { email: "analyst-" + suffix + "@pan.test", password: "Analyst-test-password-2026!" } });
@@ -97,6 +97,9 @@ assert(duplicatePromotion.status === 400, "promotional credits must only be gran
 const walletBefore = await request("/v1/manufacturer/wallet", { token });
 assert(walletBefore.status === 200 && walletBefore.data.balance === 100000 && walletBefore.data.packages.some(x => x.id === creditPackage.data.id), "manufacturer wallet should expose its ledger balance and active packages");
 
+const legacyDirectIssue = await request("/v1/batches/" + batch.data.id + "/identities", { method: "POST", token, body: { quantity: 1 } });
+assert(legacyDirectIssue.status === 410, "legacy direct QR issuance must remain retired in favour of secure Code Studio");
+
 const job = await request("/v1/manufacturer/batches/" + batch.data.id + "/issuance-jobs", { method: "POST", token, body: { unitQuantity: 2, cartonQuantity: 1 } });
 assert(job.status === 201 && job.data.status === "QUEUED", "producer should queue separate carton and unit identities");
 const walletAfterQueue = await request("/v1/manufacturer/wallet", { token });
@@ -111,16 +114,19 @@ assert(identitySearch.status === 200 && identitySearch.data.length === 1 && !("t
 
 const cartonToken = new URL(carton.verifyUrl).pathname.split("/").filter(Boolean).pop();
 const unitToken = new URL(units[0].verifyUrl).pathname.split("/").filter(Boolean).pop();
+const noSessionScan = await request("/v1/verify/" + unitToken);
+assert(noSessionScan.status === 200 && noSessionScan.data.scansRecorded === 0, "verification without a first-party session must not inflate scan metrics");
+
 const unactivated = await request("/v1/verify/" + unitToken);
 assert(unactivated.status === 200 && unactivated.data.status === "NOT_ACTIVATED", "newly exported identities must not be publicly active before quality approval");
 const activation = await request("/v1/manufacturer/batches/" + batch.data.id + "/activate", { method: "POST", token, body: { qualityChecked: true, reason: "Smoke test confirms printed labels were quality checked" } });
 assert(activation.status === 201 && activation.data.activated === 3, "manufacturer should activate exported identities after print quality confirmation");
-const cartonCheck = await request("/v1/verify/" + cartonToken);
+const cartonCheck = await request("/v1/verify/" + cartonToken, { scanSession: "40000000-0000-4000-8000-000000000101" });
 assert(cartonCheck.status === 200 && cartonCheck.data.status === "VERIFIED" && cartonCheck.data.product.packaging.identityLevel === "CARTON" && cartonCheck.data.product.packaging.containedUnitCount === 2, "carton verification should show linked unit count");
-const unitCheck = await request("/v1/verify/" + unitToken);
+const unitCheck = await request("/v1/verify/" + unitToken, { scanSession: "40000000-0000-4000-8000-000000000102" });
 assert(unitCheck.status === 200 && unitCheck.data.status === "VERIFIED" && unitCheck.data.product.packaging.identityLevel === "UNIT" && unitCheck.data.product.packaging.cartonCode === carton.code, "unit verification should show its parent carton");
 assert(unitCheck.data.product.regulatoryReferences.source === "PRODUCER_PROVIDED_NOT_VERIFIED_BY_PAN", "producer regulatory references must be explicitly labelled unverified by PAN");
-const repeat = await request("/v1/verify/" + unitToken);
+const repeat = await request("/v1/verify/" + unitToken, { scanSession: "40000000-0000-4000-8000-000000000103" });
 assert(repeat.data.status === "PREVIOUSLY_SCANNED", "repeat scan should be distinguished without claiming counterfeit");
 const firstScanSession = "40000000-0000-4000-8000-000000000001";
 const firstSessionScan = await request("/v1/verify/" + unitToken, { scanSession: firstScanSession });
@@ -134,7 +140,7 @@ for (let index = 2; index <= 10; index++) {
 assert(riskScan.data.status === "SUSPICIOUS_ACTIVITY", "ten distinct scan sessions in one day should raise a non-accusatory risk warning");
 const riskQueue = await request("/v1/manufacturer/scan-risk", { token });
 assert(riskQueue.status === 200 && riskQueue.data.some(x => x.identity?.publicCode === units[0].code), "manufacturer risk queue should show suspicious identity activity");
-const manual = await request("/v1/verify/code/" + units[1].code);
+const manual = await request("/v1/verify/code/" + units[1].code, { scanSession: "40000000-0000-4000-8000-000000000104" });
 assert(manual.status === 200 && manual.data.product.packaging.cartonCode === carton.code, "manual unit lookup should preserve carton relationship");
 const concern = await request("/v1/verify/code/" + units[0].code + "/report", { method: "POST", body: { reason: "PRODUCT_MISMATCH", details: "The printed product details do not match the information shown by the PAN identity check." } });
 assert(concern.status === 201 && concern.data.reference, "consumer should be able to report a product concern");
@@ -163,7 +169,7 @@ assert(cartonOnlyResult?.status === "COMPLETED" && cartonOnlyResult.assets.lengt
 const looseActivation = await request("/v1/manufacturer/batches/" + looseBatch.data.id + "/activate", { method: "POST", token, body: { qualityChecked: true, reason: "Smoke test confirms loose batch label quality" } });
 assert(looseActivation.status === 201 && looseActivation.data.activated === 3, "unit and carton exports should activate together after quality confirmation");
 const linkedCartonToken = new URL(cartonOnlyResult.assets[0].verifyUrl).pathname.split("/").filter(Boolean).pop();
-const linkedCartonCheck = await request("/v1/verify/" + linkedCartonToken);
+const linkedCartonCheck = await request("/v1/verify/" + linkedCartonToken, { scanSession: "50000000-0000-4000-8000-000000000002" });
 assert(linkedCartonCheck.data.product.packaging.containedUnitCount === 2, "carton-only job should link previously issued units");
 
 const expiredBatch = await request("/v1/products/" + product.data.id + "/batches", { method: "POST", token, body: { batchCode: "EXPIRED-" + suffix, quantity: 1, expiryDate: "2026-01-01T00:00:00.000Z" } });
@@ -225,6 +231,35 @@ const restoration = await request("/v1/super-admin/companies/" + workspaceId + "
 assert(restoration.status === 201 && restoration.data.status === "APPROVED", "super administrator should restore a manufacturer workspace");
 const restoredAccess = await request("/v1/products", { token: newLogin.data.accessToken });
 assert(restoredAccess.status === 200, "restored manufacturer sessions should regain protected API access");
+const pendingBatch = await request("/v1/products/" + product.data.id + "/batches", { method: "POST", token: newLogin.data.accessToken, body: { batchCode: "PENDING-" + suffix, quantity: 1 } });
+assert(pendingBatch.status === 201, "producer should create a batch for pre-activation lifecycle testing");
+const pendingJob = await request("/v1/manufacturer/batches/" + pendingBatch.data.id + "/issuance-jobs", { method: "POST", token: newLogin.data.accessToken, body: { unitQuantity: 1, cartonQuantity: 0 } });
+assert(pendingJob.status === 201, "producer should queue a single unactivated identity");
+const pendingResult = await waitForJob(pendingJob.data.id, newLogin.data.accessToken);
+assert(pendingResult?.status === "COMPLETED" && pendingResult.assets.length === 1, "pre-activation lifecycle test identity should be exported");
+const generatedIdentitySearch = await request("/v1/super-admin/identities?q=" + encodeURIComponent(pendingResult.assets[0].code), { token: adminLogin.data.accessToken });
+assert(generatedIdentitySearch.status === 200 && generatedIdentitySearch.data.length === 1 && generatedIdentitySearch.data[0].status === "EXPORTED", "super administrator should locate an unapproved exported identity");
+const quarantineBeforeActivation = await request("/v1/super-admin/identities/" + generatedIdentitySearch.data[0].id + "/quarantine", { method: "POST", token: adminLogin.data.accessToken, body: { reason: "Smoke test rejects quarantine of an identity before activation approval." } });
+assert(quarantineBeforeActivation.status === 409, "unapproved exported identities must not be quarantined and then released as active");
+const activeIdentitySearch = await request("/v1/super-admin/identities?q=" + encodeURIComponent(units[1].code), { token: adminLogin.data.accessToken });
+assert(activeIdentitySearch.status === 200 && activeIdentitySearch.data.length === 1 && activeIdentitySearch.data[0].status === "ACTIVE", "super administrator should locate an active identity for quarantine testing");
+const quarantineActive = await request("/v1/super-admin/identities/" + activeIdentitySearch.data[0].id + "/quarantine", { method: "POST", token: adminLogin.data.accessToken, body: { reason: "Smoke test quarantines an already approved active identity." } });
+assert(quarantineActive.status === 201 && quarantineActive.data.status === "QUARANTINED", "approved active identity should be quarantinable");
+const releaseActive = await request("/v1/super-admin/identities/" + activeIdentitySearch.data[0].id + "/release", { method: "POST", token: adminLogin.data.accessToken, body: { reason: "Smoke test releases an identity that was active before quarantine." } });
+assert(releaseActive.status === 201 && releaseActive.data.status === "ACTIVE", "release should restore only an identity that was active before quarantine");
+const batchRecall = await request("/v1/manufacturer/batches/" + batch.data.id + "/recall", { method: "POST", token: newLogin.data.accessToken, body: { reason: "Smoke test validates manufacturer initiated batch recall." } });
+assert(batchRecall.status === 201 && batchRecall.data.recalled > 0, "manufacturer owner should be able to recall active identities in its own batch");
+const recalledCheck = await request("/v1/verify/" + unitToken, { scanSession: "60000000-0000-4000-8000-000000000001" });
+assert(recalledCheck.status === 200 && recalledCheck.data.status === "RECALLED", "consumer verification must clearly report a recalled identity");
+const recalledIdentitySearch = await request("/v1/super-admin/identities?q=" + encodeURIComponent(units[0].code), { token: adminLogin.data.accessToken });
+assert(recalledIdentitySearch.status === 200 && recalledIdentitySearch.data.length > 0, "super administrator should locate recalled identities");
+const destroyed = await request("/v1/super-admin/identities/" + recalledIdentitySearch.data[0].id + "/destroy", { method: "POST", token: adminLogin.data.accessToken, body: { reason: "Smoke test confirms destruction is a terminal lifecycle state." } });
+assert(destroyed.status === 201 && destroyed.data.status === "DESTROYED", "super administrator should destroy a recalled identity");
+const invalidRelease = await request("/v1/super-admin/identities/" + recalledIdentitySearch.data[0].id + "/release", { method: "POST", token: adminLogin.data.accessToken, body: { reason: "This transition must be rejected after destruction." } });
+assert(invalidRelease.status === 409, "destroyed identities must not be reactivated");
+const destroyedCheck = await request("/v1/verify/" + unitToken, { scanSession: "60000000-0000-4000-8000-000000000002" });
+assert(destroyedCheck.status === 200 && destroyedCheck.data.status === "DESTROYED", "consumer verification must report destroyed identities accurately");
+
 
 console.log("PAN end-to-end smoke passed: email verification, password recovery/session revocation, facilities, invitations/RBAC, product/batch, carton-unit issuance, secure export retrieval, verification hierarchy, regulatory disclaimers, quantity guards, analytics, audit and super-admin login.");
 console.log("PAN_MOBILE_SMOKE_CODE=" + units[1].code);

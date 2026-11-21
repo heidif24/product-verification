@@ -11,11 +11,11 @@ export default function VerifyHome() {
     <section className="verify-content">
       <div className="verify-kicker"><span/> PRODUCT VERIFICATION</div>
       <h1>Know what<br/>you’re <em>holding.</em></h1>
-      <p className="verify-intro">Every product deserves an identity. Scan the product’s PAN code with your phone camera to see its verification details.</p>
-      <div className="scan-card"><div className="scan-illustration"><div className="scan-frame"><ScanLine size={45} strokeWidth={1.25}/><i className="scan-corner tl"/><i className="scan-corner tr"/><i className="scan-corner bl"/><i className="scan-corner br"/></div></div><div className="scan-copy"><b>Ready to verify?</b><span>Open your camera and point it at the product’s QR code. The result opens here automatically.</span><small>No account or app installation needed.</small></div></div>
+      <p className="verify-intro">Every product deserves an identity. Scan a PAN label with your phone camera or use the browser scanner to check its verification record.</p>
+      <div className="scan-card"><div className="scan-illustration"><div className="scan-frame"><ScanLine size={45} strokeWidth={1.25}/><i className="scan-corner tl"/><i className="scan-corner tr"/><i className="scan-corner bl"/><i className="scan-corner br"/></div></div><div className="scan-copy"><b>Ready to verify?</b><span>Open your camera and point it at a PAN1 barcode or legacy QR code. You can also scan directly in this browser.</span><small>No account or app installation needed.</small><a href="/scan" className="browser-scan-link">Scan a PAN barcode in this browser ↗</a></div></div>
       <div className="verify-divider"><span>OR</span></div>
       <form className="manual-entry" onSubmit={e=>{e.preventDefault();if(code.trim())router.push("/code/"+encodeURIComponent(code.trim().toUpperCase()))}}>
-        <label htmlFor="identity">ENTER A PRODUCT ID</label><div><input id="identity" value={code} onChange={e=>setCode(e.target.value)} placeholder="e.g. PANU-0123456789ABCDEF0123" required/><button type="submit">Verify <ArrowUpRight size={15}/></button></div><small>Enter the PAN identity printed beside the QR code.</small>
+        <label htmlFor="identity">ENTER A PRODUCT ID</label><div><input id="identity" value={code} onChange={e=>setCode(e.target.value)} placeholder="e.g. PANU-0123456789ABCDEF0123" required/><button type="submit">Verify <ArrowUpRight size={15}/></button></div><small>Enter the PAN product ID printed beside the barcode.</small>
       </form>
       <div className="verify-note"><Info size={16}/><span>A PAN identity helps you check a product record. It is not, by itself, a laboratory test or a guarantee of the physical contents.</span></div>
       <div className="app-download-prompt"><span><AppWindow size={16}/> Prefer the PAN app?</span><a href="/download">Get PAN Verify for your phone <ArrowUpRight size={14}/></a></div>

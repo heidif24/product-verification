@@ -10,7 +10,7 @@ function assertProductionConfiguration() {
     "DATABASE_URL", "JWT_SECRET", "TOKEN_PEPPER", "AUDIT_HMAC_KEY", "EXPORT_ENCRYPTION_KEY", "PAYSTACK_SECRET_KEY",
     "SUPER_ADMIN_EMAIL", "SUPER_ADMIN_PASSWORD_HASH", "PUBLIC_VERIFY_URL", "MANUFACTURER_APP_URL",
     "CORS_ORIGINS", "SMTP_HOST", "MAIL_FROM", "PRIVACY_CONTACT_EMAIL",
-    "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"
+    "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "CLAMAV_HOST", "CLAMAV_PORT", "TRUST_PROXY_HOPS"
   ] as const;
   for (const key of required) {
     if (!process.env[key]?.trim()) throw new Error(`${key} is required in production.`);
@@ -65,7 +65,10 @@ async function bootstrap() {
   }
   if (process.env.NODE_ENV === "production") assertProductionConfiguration();
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const proxyHops = process.env.TRUST_PROXY_HOPS === undefined ? 0 : Number(process.env.TRUST_PROXY_HOPS);
+  if (!Number.isInteger(proxyHops) || proxyHops < 0 || proxyHops > 5) throw new Error("TRUST_PROXY_HOPS must be an integer from 0 to 5.");
+  app.getHttpAdapter().getInstance().set("trust proxy", proxyHops);
   const origins = (process.env.CORS_ORIGINS || "http://localhost:3000,http://localhost:3001").split(",").map(x => x.trim());
   app.enableCors({ origin: origins, credentials: true });
   app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));

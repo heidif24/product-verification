@@ -5,7 +5,7 @@ import "./workspace-tools.css";
 
 const consumerDownloadUrl = (process.env.NEXT_PUBLIC_PAN_VERIFY_URL || "https://www.pan.ng").replace(/\/$/, "") + "/download";
 
-export default function ManufacturerPortalLayout({ children }: { children: ReactNode }) {
+export default function ManufacturerPortalLayout({ children }: { children: React.ReactNode }) {
   return <>
     <nav className="workspace-tools" aria-label="Manufacturer tools">
       <span>MANUFACTURER TOOLS</span>

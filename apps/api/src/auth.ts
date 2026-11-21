@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, Injectable, SetMetadata, UnauthorizedException } from "@nestjs/common";
+import { CanActivate, ExecutionContext, ForbiddenException, Injectable, SetMetadata, UnauthorizedException } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import type { Request } from "express";
 import { PrismaService } from "./prisma.service";
@@ -15,11 +15,17 @@ export class AuthGuard implements CanActivate {
     const isPublic = Reflect.getMetadata(IS_PUBLIC, context.getHandler());
     if (isPublic) return true;
     const header = req.headers.authorization;
-    if (!header?.startsWith("Bearer ")) throw new UnauthorizedException("Sign in to continue");
+    const cookieToken = req.headers.cookie?.split(";").map(part => part.trim()).find(part => part.startsWith("pan_super_admin="))?.slice("pan_super_admin=".length);
+    const token = header?.startsWith("Bearer ") ? header.slice(7) : cookieToken;
+    if (!token) throw new UnauthorizedException("Sign in to continue");
     try {
-      req.user = await this.jwt.verifyAsync(header.slice(7));
+      req.user = await this.jwt.verifyAsync(token);
     } catch {
       throw new UnauthorizedException("Your session has expired. Please sign in again.");
+    }
+    if (cookieToken && req.user.role === "SUPER_ADMIN" && !["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+      const expectedOrigin = process.env.MANUFACTURER_APP_URL ? new URL(process.env.MANUFACTURER_APP_URL).origin : "";
+      if (!expectedOrigin || req.headers.origin !== expectedOrigin) throw new ForbiddenException("Invalid administrator request origin.");
     }
     if (req.user.role === "SUPER_ADMIN") return Boolean(req.user.sub);
     if (!req.user.sub || !req.user.manufacturerId) throw new UnauthorizedException("Your session is invalid.");
