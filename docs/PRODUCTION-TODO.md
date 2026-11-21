@@ -193,7 +193,8 @@ See `apps/consumer-mobile/RELEASE-AND-DEVICE-TESTING.md` (updated).
 
 ### 6.1 Automated Acceptance (CI already covers baseline)
 - [x] CI workflows for typecheck, API smoke, web builds and Android emulator journey exist.
-- [ ] Re-run and obtain a green result for the complete suite on the final production-candidate commit.
+- [x] Full quality CI passed: API smoke, API build, both web builds and manufacturer/verification/mobile typechecks.
+- [ ] Complete Android debug APK and emulator journey, then rerun against the final frozen-lockfile head.
 - [ ] Add dedicated load / concurrency suite for 10 000+ identity issuance, worker restart recovery, and carton-unit reconciliation (can be a separate workflow or script).
 
 ### 6.2 Manual / Operational Acceptance
