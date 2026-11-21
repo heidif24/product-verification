@@ -231,8 +231,14 @@ const restoration = await request("/v1/super-admin/companies/" + workspaceId + "
 assert(restoration.status === 201 && restoration.data.status === "APPROVED", "super administrator should restore a manufacturer workspace");
 const restoredAccess = await request("/v1/products", { token: newLogin.data.accessToken });
 assert(restoredAccess.status === 200, "restored manufacturer sessions should regain protected API access");
-const generatedIdentitySearch = await request("/v1/super-admin/identities?q=" + encodeURIComponent(looseResult.assets[0].code), { token: adminLogin.data.accessToken });
-assert(generatedIdentitySearch.status === 200 && generatedIdentitySearch.data.length === 1, "super administrator should locate an unapproved exported identity");
+const pendingBatch = await request("/v1/products/" + product.data.id + "/batches", { method: "POST", token: newLogin.data.accessToken, body: { batchCode: "PENDING-" + suffix, quantity: 1 } });
+assert(pendingBatch.status === 201, "producer should create a batch for pre-activation lifecycle testing");
+const pendingJob = await request("/v1/manufacturer/batches/" + pendingBatch.data.id + "/issuance-jobs", { method: "POST", token: newLogin.data.accessToken, body: { unitQuantity: 1, cartonQuantity: 0 } });
+assert(pendingJob.status === 201, "producer should queue a single unactivated identity");
+const pendingResult = await waitForJob(pendingJob.data.id, newLogin.data.accessToken);
+assert(pendingResult?.status === "COMPLETED" && pendingResult.assets.length === 1, "pre-activation lifecycle test identity should be exported");
+const generatedIdentitySearch = await request("/v1/super-admin/identities?q=" + encodeURIComponent(pendingResult.assets[0].code), { token: adminLogin.data.accessToken });
+assert(generatedIdentitySearch.status === 200 && generatedIdentitySearch.data.length === 1 && generatedIdentitySearch.data[0].status === "EXPORTED", "super administrator should locate an unapproved exported identity");
 const quarantineBeforeActivation = await request("/v1/super-admin/identities/" + generatedIdentitySearch.data[0].id + "/quarantine", { method: "POST", token: adminLogin.data.accessToken, body: { reason: "Smoke test rejects quarantine of an identity before activation approval." } });
 assert(quarantineBeforeActivation.status === 409, "unapproved exported identities must not be quarantined and then released as active");
 const activeIdentitySearch = await request("/v1/super-admin/identities?q=" + encodeURIComponent(units[1].code), { token: adminLogin.data.accessToken });
