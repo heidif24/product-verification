@@ -3,7 +3,7 @@ import { Throttle } from "@nestjs/throttler";
 import { JwtService } from "@nestjs/jwt";
 import { createHmac, randomBytes } from "node:crypto";
 import * as bcrypt from "bcryptjs";
-import type { Request } from "express";
+import type { Request, Response } from "express";
 import { PrismaService } from "./prisma.service";
 import { appendAudit, verifyAuditChain } from "./audit";
 import { PAYMENT_PROVIDER, PaymentProvider } from "./payments.service";
@@ -36,7 +36,7 @@ export class SuperAdminAuthController {
   @Post("v1/super-admin/auth/login")
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
-  async login(@Body() body: { email?: string; password?: string }) {
+  async login(@Body() body: { email?: string; password?: string }, @Res({ passthrough: true }) response: Response) {
     const email = body.email?.trim().toLowerCase() || "";
     const configuredEmail = (process.env.SUPER_ADMIN_EMAIL || "").trim().toLowerCase();
     const passwordHash = process.env.SUPER_ADMIN_PASSWORD_HASH || "";
@@ -44,7 +44,20 @@ export class SuperAdminAuthController {
       throw new UnauthorizedException("Administrator email or password is incorrect.");
     }
     const accessToken = this.jwt.sign({ sub: "pan-super-admin", manufacturerId: "", role: "SUPER_ADMIN", superAdmin: true }, { expiresIn: "30m" });
-    return { accessToken, expiresIn: 1800, role: "SUPER_ADMIN" };
+    response.cookie("pan_super_admin", accessToken, {
+      httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict",
+      path: "/", maxAge: 30 * 60 * 1000
+    });
+    return { expiresIn: 1800, role: "SUPER_ADMIN" };
+  }
+
+  @Post("v1/super-admin/auth/logout")
+  @Public()
+  logout(@Res({ passthrough: true }) response: Response) {
+    response.clearCookie("pan_super_admin", {
+      httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict", path: "/"
+    });
+    return { ok: true };
   }
 }
 
