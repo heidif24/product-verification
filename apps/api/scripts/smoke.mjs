@@ -42,7 +42,7 @@ const facility = await request("/v1/manufacturer/facilities", { method: "POST", 
 assert(facility.status === 201 && facility.data.isPrimary, "producer should register a production facility");
 
 const invite = await request("/v1/manufacturer/team/invitations", { method: "POST", token, body: { email: "analyst-" + suffix + "@pan.test", role: "ANALYST" } });
-assert(invite.status === 201 && invite.data.testInvitationToken, "owner should send a staff invitation");
+assert(invite.status === 201 && invite.data.testInvitationToken, "owner should send a staff invitation (HTTP " + invite.status + ", message: " + (invite.data.message || invite.data.error || "none") + ", test token returned: " + Boolean(invite.data.testInvitationToken) + ")");
 const accepted = await request("/v1/manufacturer/invitations/accept", { method: "POST", body: { token: invite.data.testInvitationToken, fullName: "PAN CI Analyst", password: "Analyst-test-password-2026!" } });
 assert(accepted.status === 201 && accepted.data.accepted, "invitee should accept the workspace invitation");
 const analystLogin = await request("/v1/auth/login", { method: "POST", body: { email: "analyst-" + suffix + "@pan.test", password: "Analyst-test-password-2026!" } });
