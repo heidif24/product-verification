@@ -18,6 +18,7 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(IssuanceWorker.name);
   private timer?: NodeJS.Timeout;
   private running = false;
+  private readonly workerId = randomUUID();
   constructor(private db: PrismaService) {}
   onModuleInit() { this.timer = setInterval(() => void this.processNext(), 1500); void this.processNext(); }
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
@@ -25,12 +26,16 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
     if (this.running) return;
     this.running = true;
     try {
-      await this.db.issuanceJob.updateMany({ where: { status: "PROCESSING", updatedAt: { lt: new Date(Date.now() - 5 * 60 * 1000) } }, data: { status: "QUEUED" } });
+      await this.db.issuanceJob.updateMany({ where: { status: "PROCESSING", OR: [{ leaseUntil: { lt: new Date() } }, { leaseUntil: null }] }, data: { status: "QUEUED", leaseOwner: null, leaseUntil: null } });
       const candidate = await this.db.issuanceJob.findFirst({ where: { status: "QUEUED" }, orderBy: { createdAt: "asc" } });
       if (!candidate) return;
-      const claimed = await this.db.issuanceJob.updateMany({ where: { id: candidate.id, status: "QUEUED" }, data: { status: "PROCESSING" } });
+      const claimed = await this.db.issuanceJob.updateMany({ where: { id: candidate.id, status: "QUEUED" }, data: { status: "PROCESSING", leaseOwner: this.workerId, leaseUntil: new Date(Date.now() + 5 * 60 * 1000) } });
       if (!claimed.count) return;
-      await this.processJob(candidate.id);
+      const heartbeat = setInterval(() => {
+        void this.db.issuanceJob.updateMany({ where: { id: candidate.id, status: "PROCESSING", leaseOwner: this.workerId }, data: { leaseUntil: new Date(Date.now() + 5 * 60 * 1000) } })
+          .catch(error => this.logger.error("Issuance lease heartbeat failed: " + candidate.id, error instanceof Error ? error.stack : String(error)));
+      }, 60_000);
+      try { await this.processJob(candidate.id); } finally { clearInterval(heartbeat); }
     } catch (error) {
       this.logger.error("Issuance worker cycle failed", error instanceof Error ? error.stack : String(error));
     } finally { this.running = false; }
@@ -75,13 +80,13 @@ export class IssuanceWorker implements OnModuleInit, OnModuleDestroy {
             if (linked.count !== ids.length) throw new Error("Some unit identities were already assigned to another carton.");
           }
         }
-        await tx.issuanceJob.update({ where: { id: jobId }, data: { status: "COMPLETED", progress: 100, resultCiphertext: ciphertext, expiresAt } });
+        await tx.issuanceJob.update({ where: { id: jobId }, data: { status: "COMPLETED", progress: 100, resultCiphertext: ciphertext, expiresAt, leaseOwner: null, leaseUntil: null } });
       }, { timeout: 120000 });
     } catch (error) {
       this.logger.error("Issuance job failed: " + jobId, error instanceof Error ? error.stack : String(error));
       const job = await this.db.issuanceJob.findUnique({ where: { id: jobId }, select: { id: true, manufacturerId: true, createdById: true, unitQuantity: true, cartonQuantity: true } });
       if (job) await this.db.$transaction(async tx => {
-        const failed = await tx.issuanceJob.updateMany({ where: { id: jobId, status: "PROCESSING" }, data: { status: "FAILED", errorMessage: "Issuance could not be completed. Contact PAN support with the job reference." } });
+        const failed = await tx.issuanceJob.updateMany({ where: { id: jobId, status: "PROCESSING" }, data: { status: "FAILED", errorMessage: "Issuance could not be completed. Contact PAN support with the job reference.", leaseOwner: null, leaseUntil: null } });
         if (!failed.count) return;
         const refundCredits = job.unitQuantity + job.cartonQuantity;
         await tx.walletEntry.create({ data: { manufacturerId: job.manufacturerId, amountCredits: refundCredits, type: "ISSUANCE_REFUND", idempotencyKey: "issuance-refund:" + jobId, actorId: "PAN_SYSTEM", reason: `${refundCredits} credits refunded for failed issuance job ${jobId}.` } });
