@@ -260,11 +260,21 @@ export class SuperAdminController {
   }
   @Post("privacy-requests/:id/status")
   async updatePrivacyRequest(@Param("id") id: string, @Body() body: { status?: string; note?: string }) {
-    if (!["IN_REVIEW", "COMPLETED", "REJECTED"].includes(body.status || "")) throw new BadRequestException("Choose a valid privacy request status.");
+    const status = body.status, note = body.note?.trim() || "";
+    if (!["IN_REVIEW", "COMPLETED", "REJECTED"].includes(status || "")) throw new BadRequestException("Choose a valid privacy request status.");
+    if ((status === "COMPLETED" || status === "REJECTED") && note.length < 20) {
+      throw new BadRequestException("A completion or rejection requires at least 20 characters of verification and handling evidence.");
+    }
     return this.db.$transaction(async tx => {
       const previous = await tx.privacyRequest.findUnique({ where: { id }, select: { status: true } });
-      const request = await tx.privacyRequest.update({ where: { id }, data: { status: body.status!, adminNote: body.note?.trim() || null } });
-      await appendAudit(tx, { actor: "SUPER_ADMIN", action: "PRIVACY_REQUEST_" + body.status, targetType: "PRIVACY_REQUEST", targetId: id, reason: body.note?.trim() || "Privacy request status updated.", metadata: { before: { status: previous?.status ?? null }, after: { status: request.status } } });
+      if (!previous) throw new NotFoundException("Privacy request not found.");
+      if (status === "IN_REVIEW" && !["RECEIVED", "IN_REVIEW"].includes(previous.status)) throw new ConflictException("Only a received request can enter review.");
+      if ((status === "COMPLETED" || status === "REJECTED") && previous.status !== "IN_REVIEW") throw new ConflictException("A privacy request must be under review before it can be completed or rejected.");
+      const request = await tx.privacyRequest.update({
+        where: { id },
+        data: { status: status!, adminNote: note || null, ...(status === "COMPLETED" ? { completedAt: new Date() } : {}) }
+      });
+      await appendAudit(tx, { actor: "SUPER_ADMIN", action: "PRIVACY_REQUEST_" + status, targetType: "PRIVACY_REQUEST", targetId: id, reason: note || "Privacy request moved into review.", metadata: { before: { status: previous.status }, after: { status: request.status, completedAt: request.completedAt?.toISOString() ?? null } } });
       return request;
     });
   }
