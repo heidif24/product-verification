@@ -231,6 +231,16 @@ const restoration = await request("/v1/super-admin/companies/" + workspaceId + "
 assert(restoration.status === 201 && restoration.data.status === "APPROVED", "super administrator should restore a manufacturer workspace");
 const restoredAccess = await request("/v1/products", { token: newLogin.data.accessToken });
 assert(restoredAccess.status === 200, "restored manufacturer sessions should regain protected API access");
+const generatedIdentitySearch = await request("/v1/super-admin/identities?q=" + encodeURIComponent(looseResult.assets[0].code), { token: adminLogin.data.accessToken });
+assert(generatedIdentitySearch.status === 200 && generatedIdentitySearch.data.length === 1, "super administrator should locate an unapproved exported identity");
+const quarantineBeforeActivation = await request("/v1/super-admin/identities/" + generatedIdentitySearch.data[0].id + "/quarantine", { method: "POST", token: adminLogin.data.accessToken, body: { reason: "Smoke test rejects quarantine of an identity before activation approval." } });
+assert(quarantineBeforeActivation.status === 409, "unapproved exported identities must not be quarantined and then released as active");
+const activeIdentitySearch = await request("/v1/super-admin/identities?q=" + encodeURIComponent(units[1].code), { token: adminLogin.data.accessToken });
+assert(activeIdentitySearch.status === 200 && activeIdentitySearch.data.length === 1 && activeIdentitySearch.data[0].status === "ACTIVE", "super administrator should locate an active identity for quarantine testing");
+const quarantineActive = await request("/v1/super-admin/identities/" + activeIdentitySearch.data[0].id + "/quarantine", { method: "POST", token: adminLogin.data.accessToken, body: { reason: "Smoke test quarantines an already approved active identity." } });
+assert(quarantineActive.status === 201 && quarantineActive.data.status === "QUARANTINED", "approved active identity should be quarantinable");
+const releaseActive = await request("/v1/super-admin/identities/" + activeIdentitySearch.data[0].id + "/release", { method: "POST", token: adminLogin.data.accessToken, body: { reason: "Smoke test releases an identity that was active before quarantine." } });
+assert(releaseActive.status === 201 && releaseActive.data.status === "ACTIVE", "release should restore only an identity that was active before quarantine");
 const batchRecall = await request("/v1/manufacturer/batches/" + batch.data.id + "/recall", { method: "POST", token: newLogin.data.accessToken, body: { reason: "Smoke test validates manufacturer initiated batch recall." } });
 assert(batchRecall.status === 201 && batchRecall.data.recalled > 0, "manufacturer owner should be able to recall active identities in its own batch");
 const recalledCheck = await request("/v1/verify/" + unitToken, { scanSession: "60000000-0000-4000-8000-000000000001" });
