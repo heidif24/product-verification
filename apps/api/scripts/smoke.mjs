@@ -97,6 +97,9 @@ assert(duplicatePromotion.status === 400, "promotional credits must only be gran
 const walletBefore = await request("/v1/manufacturer/wallet", { token });
 assert(walletBefore.status === 200 && walletBefore.data.balance === 100000 && walletBefore.data.packages.some(x => x.id === creditPackage.data.id), "manufacturer wallet should expose its ledger balance and active packages");
 
+const legacyDirectIssue = await request("/v1/batches/" + batch.data.id + "/identities", { method: "POST", token, body: { quantity: 1 } });
+assert(legacyDirectIssue.status === 410, "legacy direct QR issuance must remain retired in favour of secure Code Studio");
+
 const job = await request("/v1/manufacturer/batches/" + batch.data.id + "/issuance-jobs", { method: "POST", token, body: { unitQuantity: 2, cartonQuantity: 1 } });
 assert(job.status === 201 && job.data.status === "QUEUED", "producer should queue separate carton and unit identities");
 const walletAfterQueue = await request("/v1/manufacturer/wallet", { token });
@@ -111,6 +114,9 @@ assert(identitySearch.status === 200 && identitySearch.data.length === 1 && !("t
 
 const cartonToken = new URL(carton.verifyUrl).pathname.split("/").filter(Boolean).pop();
 const unitToken = new URL(units[0].verifyUrl).pathname.split("/").filter(Boolean).pop();
+const noSessionScan = await request("/v1/verify/" + unitToken);
+assert(noSessionScan.status === 200 && noSessionScan.data.status === "VERIFIED" && noSessionScan.data.scansRecorded === 0, "verification without a first-party session must not inflate scan metrics");
+
 const unactivated = await request("/v1/verify/" + unitToken);
 assert(unactivated.status === 200 && unactivated.data.status === "NOT_ACTIVATED", "newly exported identities must not be publicly active before quality approval");
 const activation = await request("/v1/manufacturer/batches/" + batch.data.id + "/activate", { method: "POST", token, body: { qualityChecked: true, reason: "Smoke test confirms printed labels were quality checked" } });
