@@ -38,7 +38,7 @@ async function scanWithClamAv(bytes: Buffer): Promise<void> {
     };
     socket.setTimeout(15000, () => fail(new Error("ClamAV scan timed out.")));
     socket.on("error", error => fail(error));
-    socket.on("data", chunk => { response += chunk.toString("utf8"); if (response.includes("\\0")) { const clean = response.replace(/\\0/g, "").trim(); if (/FOUND$/.test(clean)) fail(new Error("Uploaded document was identified as malware.")); else if (/OK$/.test(clean)) { settled = true; socket.destroy(); resolve(); } else fail(new Error("ClamAV returned an invalid scan response.")); } });
+    socket.on("data", chunk => { response += chunk.toString("utf8"); if (response.includes("\0")) { const clean = response.replace(/\0/g, "").trim(); if (/FOUND$/.test(clean)) fail(new Error("Uploaded document was identified as malware.")); else if (/OK$/.test(clean)) { settled = true; socket.destroy(); resolve(); } else fail(new Error("ClamAV returned an invalid scan response.")); } });
     socket.on("end", () => {
       if (settled) return;
       settled = true;
@@ -47,7 +47,7 @@ async function scanWithClamAv(bytes: Buffer): Promise<void> {
       resolve();
     });
     socket.on("connect", () => {
-      socket.write(Buffer.from("zINSTREAM\\0", "ascii"));
+      socket.write(Buffer.from("zINSTREAM\0", "ascii"));
       const chunkSize = 64 * 1024;
       for (let offset = 0; offset < bytes.length; offset += chunkSize) {
         const chunk = bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length));
