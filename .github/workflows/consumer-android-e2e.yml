@@ -51,7 +51,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @pan/api typecheck
       - name: Create isolated CI super-admin password hash
         run: |
@@ -100,6 +100,8 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_2
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          disable-animations: true
           script: |
             adb install apps/consumer-mobile/android/app/build/outputs/apk/debug/app-debug.apk
             maestro --version
