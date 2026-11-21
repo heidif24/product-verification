@@ -115,7 +115,7 @@ assert(identitySearch.status === 200 && identitySearch.data.length === 1 && !("t
 const cartonToken = new URL(carton.verifyUrl).pathname.split("/").filter(Boolean).pop();
 const unitToken = new URL(units[0].verifyUrl).pathname.split("/").filter(Boolean).pop();
 const noSessionScan = await request("/v1/verify/" + unitToken);
-assert(noSessionScan.status === 200 && noSessionScan.data.status === "VERIFIED" && noSessionScan.data.scansRecorded === 0, "verification without a first-party session must not inflate scan metrics");
+assert(noSessionScan.status === 200 && noSessionScan.data.scansRecorded === 0, "verification without a first-party session must not inflate scan metrics");
 
 const unactivated = await request("/v1/verify/" + unitToken);
 assert(unactivated.status === 200 && unactivated.data.status === "NOT_ACTIVATED", "newly exported identities must not be publicly active before quality approval");
