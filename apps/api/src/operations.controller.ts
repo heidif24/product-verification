@@ -65,7 +65,24 @@ export class SuperAdminController {
   scanRisk() {
     return this.db.verificationEvent.findMany({
       where: { riskLevel: "HIGH", identityId: { not: null } },
-      select: { id: true, outcome: true, riskLevel: true, createdAt: true, identity: { select: { publicCode: true, verificationCount: true, batch: { select: { batchCode: true, product: { select: { name: true, manufacturer: { select: { legalName: true } } } } } } } },
+      select: {
+        id: true,
+        outcome: true,
+        riskLevel: true,
+        createdAt: true,
+        identity: {
+          select: {
+            publicCode: true,
+            verificationCount: true,
+            batch: {
+              select: {
+                batchCode: true,
+                product: { select: { name: true, manufacturer: { select: { legalName: true } } } }
+              }
+            }
+          }
+        }
+      },
       orderBy: { createdAt: "desc" },
       take: 200
     });
@@ -450,7 +467,16 @@ export class ManufacturerOperationsController {
         ...(status ? { status } : {}),
         identity: { is: { batch: { product: { manufacturerId: req.user.manufacturerId } } } }
       },
-      include: { identity: { select: { publicCode: true, verificationCount: true, events: { orderBy: { createdAt: "desc" }, take: 50, select: { outcome: true, createdAt: true, isIndependent: true } }, batch: { select: { batchCode: true, product: { select: { name: true, brand: true } } } } } },
+      include: {
+        identity: {
+          select: {
+            publicCode: true,
+            verificationCount: true,
+            events: { orderBy: { createdAt: "desc" }, take: 50, select: { outcome: true, createdAt: true, isIndependent: true } },
+            batch: { select: { batchCode: true, product: { select: { name: true, brand: true } } } }
+          }
+        }
+      },
       orderBy: { createdAt: "desc" },
       take: 200
     });
@@ -460,7 +486,19 @@ export class ManufacturerOperationsController {
     await workspaceRole(this.db, req, ["OWNER", "ADMIN", "ANALYST", "SUPPORT"]);
     return this.db.verificationEvent.findMany({
       where: { riskLevel: "HIGH", identity: { is: { batch: { product: { manufacturerId: req.user.manufacturerId } } } } },
-      select: { id: true, outcome: true, riskLevel: true, createdAt: true, identity: { select: { publicCode: true, verificationCount: true, batch: { select: { batchCode: true, product: { select: { name: true } } } } } },
+      select: {
+        id: true,
+        outcome: true,
+        riskLevel: true,
+        createdAt: true,
+        identity: {
+          select: {
+            publicCode: true,
+            verificationCount: true,
+            batch: { select: { batchCode: true, product: { select: { name: true } } } }
+          }
+        }
+      },
       orderBy: { createdAt: "desc" },
       take: 100
     });
