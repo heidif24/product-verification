@@ -10,7 +10,7 @@ function assertProductionConfiguration() {
     "DATABASE_URL", "JWT_SECRET", "TOKEN_PEPPER", "AUDIT_HMAC_KEY", "EXPORT_ENCRYPTION_KEY", "PAYSTACK_SECRET_KEY",
     "SUPER_ADMIN_EMAIL", "SUPER_ADMIN_PASSWORD_HASH", "PUBLIC_VERIFY_URL", "MANUFACTURER_APP_URL",
     "CORS_ORIGINS", "SMTP_HOST", "MAIL_FROM", "PRIVACY_CONTACT_EMAIL",
-    "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"
+    "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "CLAMAV_HOST", "CLAMAV_PORT"
   ] as const;
   for (const key of required) {
     if (!process.env[key]?.trim()) throw new Error(`${key} is required in production.`);
