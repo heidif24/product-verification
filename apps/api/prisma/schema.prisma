@@ -251,6 +251,8 @@ model IssuanceJob {
   resultCiphertext    String?
   errorMessage        String?
   expiresAt           DateTime?
+  leaseOwner          String?
+  leaseUntil          DateTime?
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
   manufacturer        Manufacturer      @relation(fields: [manufacturerId], references: [id], onDelete: Cascade)
