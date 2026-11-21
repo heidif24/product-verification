@@ -65,7 +65,7 @@ async function bootstrap() {
   }
   if (process.env.NODE_ENV === "production") assertProductionConfiguration();
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const origins = (process.env.CORS_ORIGINS || "http://localhost:3000,http://localhost:3001").split(",").map(x => x.trim());
   app.enableCors({ origin: origins, credentials: true });
   app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
