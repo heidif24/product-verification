@@ -186,18 +186,30 @@ export class SuperAdminController {
   async identities(@Query("q") q = "", @Query("status") status = "") {
     const where: any = {};
     if (q.trim()) where.publicCode = { contains: q.trim().toUpperCase(), mode: "insensitive" };
-    if (["ACTIVE", "QUARANTINED", "REVOKED"].includes(status)) where.status = status;
+    if (["GENERATED", "EXPORTED", "PRINTED", "QUALITY_CHECKED", "ACTIVE", "QUARANTINED", "REVOKED", "RECALLED", "BLOCKED", "DESTROYED", "CANCELLED"].includes(status)) where.status = status;
     return this.db.productIdentity.findMany({ where, select: { id: true, publicCode: true, level: true, status: true, verificationCount: true, issuedAt: true, batch: { select: { batchCode: true, product: { select: { name: true, manufacturer: { select: { id: true, legalName: true } } } } } }, carton: { select: { publicCode: true } }, _count: { select: { containedUnits: true } } }, orderBy: { issuedAt: "desc" }, take: 100 });
   }
   @Post("identities/:id/:action")
   async identityAction(@Param("id") id: string, @Param("action") action: string, @Body() body: { reason?: string }) {
-    const state: Record<string, "ACTIVE" | "QUARANTINED" | "REVOKED"> = { release: "ACTIVE", quarantine: "QUARANTINED", revoke: "REVOKED" };
-    const status = state[action], reason = body.reason?.trim();
-    if (!status || !reason || reason.length < 10) throw new BadRequestException("Choose release, quarantine or revoke and provide a reason.");
+    const transitions: Record<string, { to: "ACTIVE" | "QUARANTINED" | "REVOKED" | "RECALLED" | "BLOCKED" | "DESTROYED" | "CANCELLED"; from: string[] }> = {
+      release: { to: "ACTIVE", from: ["QUARANTINED"] },
+      quarantine: { to: "QUARANTINED", from: ["GENERATED", "EXPORTED", "PRINTED", "QUALITY_CHECKED", "ACTIVE"] },
+      revoke: { to: "REVOKED", from: ["GENERATED", "EXPORTED", "PRINTED", "QUALITY_CHECKED", "ACTIVE", "QUARANTINED", "RECALLED", "BLOCKED"] },
+      recall: { to: "RECALLED", from: ["ACTIVE", "QUARANTINED", "BLOCKED"] },
+      block: { to: "BLOCKED", from: ["EXPORTED", "PRINTED", "QUALITY_CHECKED", "ACTIVE"] },
+      destroy: { to: "DESTROYED", from: ["REVOKED", "RECALLED"] },
+      cancel: { to: "CANCELLED", from: ["GENERATED", "EXPORTED"] }
+    };
+    const transition = transitions[action], reason = body.reason?.trim();
+    if (!transition || !reason || reason.length < 10 || reason.length > 1000) throw new BadRequestException("Choose a valid lifecycle action and provide a reason of 10 to 1,000 characters.");
     return this.db.$transaction(async tx => {
       const previous = await tx.productIdentity.findUnique({ where: { id }, select: { status: true } });
-      const identity = await tx.productIdentity.update({ where: { id }, data: { status }, select: { id: true, publicCode: true, level: true, status: true } });
-      await appendAudit(tx, { actor: "SUPER_ADMIN", action: "IDENTITY_" + action.toUpperCase(), targetType: "PRODUCT_IDENTITY", targetId: id, reason, metadata: { before: { status: previous?.status ?? null }, after: { status: identity.status } } });
+      if (!previous) throw new NotFoundException("Product identity not found.");
+      if (!transition.from.includes(previous.status)) throw new ConflictException("This identity cannot move from " + previous.status + " to " + transition.to + ".");
+      const changed = await tx.productIdentity.updateMany({ where: { id, status: previous.status }, data: { status: transition.to } });
+      if (!changed.count) throw new ConflictException("The identity changed while this action was being processed. Refresh and try again.");
+      const identity = await tx.productIdentity.findUnique({ where: { id }, select: { id: true, publicCode: true, level: true, status: true } });
+      await appendAudit(tx, { actor: "SUPER_ADMIN", action: "IDENTITY_" + action.toUpperCase(), targetType: "PRODUCT_IDENTITY", targetId: id, reason, metadata: { before: { status: previous.status }, after: { status: transition.to } } });
       return identity;
     });
   }
@@ -586,6 +598,20 @@ export class ManufacturerOperationsController {
     }
     return { id: job.id, status: job.status, progress: job.progress, errorMessage: job.errorMessage, expiresAt: job.expiresAt, assets };
   }
+  @Post("batches/:id/recall")
+  async recallBatch(@Req() req: AuthRequest, @Param("id") id: string, @Body() body: { reason?: string }) {
+    await workspaceRole(this.db, req, ["OWNER", "ADMIN"]);
+    const reason = body.reason?.trim() || "";
+    if (reason.length < 10 || reason.length > 1000) throw new BadRequestException("Provide a recall reason of 10 to 1,000 characters.");
+    return this.db.$transaction(async tx => {
+      const batch = await tx.batch.findFirst({ where: { id, product: { manufacturerId: req.user.manufacturerId } }, select: { id: true, batchCode: true, product: { select: { name: true } } } });
+      if (!batch) throw new NotFoundException("Production batch not found.");
+      const recalled = await tx.productIdentity.updateMany({ where: { batchId: id, status: "ACTIVE" }, data: { status: "RECALLED" } });
+      await appendAudit(tx, { actor: req.user.sub, action: "MANUFACTURER_BATCH_RECALL_INITIATED", targetType: "BATCH", targetId: id, reason, metadata: { batchCode: batch.batchCode, productName: batch.product.name, recalledIdentities: recalled.count } });
+      return { batchCode: batch.batchCode, recalled: recalled.count, status: "RECALLED", message: "Active identities in this batch have been marked as recalled." };
+    });
+  }
+
   @Post("batches/:id/activate")
   async activateBatch(@Req() req: AuthRequest, @Param("id") id: string, @Body() body: { qualityChecked?: boolean; reason?: string }) {
     await workspaceRole(this.db, req, ["OWNER", "ADMIN", "OPERATOR"]);
