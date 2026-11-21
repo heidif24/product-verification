@@ -140,7 +140,7 @@ for (let index = 2; index <= 10; index++) {
 assert(riskScan.data.status === "SUSPICIOUS_ACTIVITY", "ten distinct scan sessions in one day should raise a non-accusatory risk warning");
 const riskQueue = await request("/v1/manufacturer/scan-risk", { token });
 assert(riskQueue.status === 200 && riskQueue.data.some(x => x.identity?.publicCode === units[0].code), "manufacturer risk queue should show suspicious identity activity");
-const manual = await request("/v1/verify/code/" + units[1].code);
+const manual = await request("/v1/verify/code/" + units[1].code, { scanSession: "40000000-0000-4000-8000-000000000104" });
 assert(manual.status === 200 && manual.data.product.packaging.cartonCode === carton.code, "manual unit lookup should preserve carton relationship");
 const concern = await request("/v1/verify/code/" + units[0].code + "/report", { method: "POST", body: { reason: "PRODUCT_MISMATCH", details: "The printed product details do not match the information shown by the PAN identity check." } });
 assert(concern.status === 201 && concern.data.reference, "consumer should be able to report a product concern");
@@ -169,7 +169,7 @@ assert(cartonOnlyResult?.status === "COMPLETED" && cartonOnlyResult.assets.lengt
 const looseActivation = await request("/v1/manufacturer/batches/" + looseBatch.data.id + "/activate", { method: "POST", token, body: { qualityChecked: true, reason: "Smoke test confirms loose batch label quality" } });
 assert(looseActivation.status === 201 && looseActivation.data.activated === 3, "unit and carton exports should activate together after quality confirmation");
 const linkedCartonToken = new URL(cartonOnlyResult.assets[0].verifyUrl).pathname.split("/").filter(Boolean).pop();
-const linkedCartonCheck = await request("/v1/verify/" + linkedCartonToken);
+const linkedCartonCheck = await request("/v1/verify/" + linkedCartonToken, { scanSession: "50000000-0000-4000-8000-000000000002" });
 assert(linkedCartonCheck.data.product.packaging.containedUnitCount === 2, "carton-only job should link previously issued units");
 
 const expiredBatch = await request("/v1/products/" + product.data.id + "/batches", { method: "POST", token, body: { batchCode: "EXPIRED-" + suffix, quantity: 1, expiryDate: "2026-01-01T00:00:00.000Z" } });
