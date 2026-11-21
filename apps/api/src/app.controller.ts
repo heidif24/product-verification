@@ -24,14 +24,13 @@ export class AppController {
 
   private async recordIdentityScan(identityId: string, initialOutcome: string, sessionId: string | undefined, now: Date, currentCount: number) {
     const sessionHash = scanSessionDigest(sessionId);
+    // Requests without a valid first-party scan session may still verify an identity,
+    // but must not inflate scan metrics or create unbounded event rows.
+    if (!sessionHash) return { outcome: initialOutcome, independent: false, duplicate: false, scansRecorded: currentCount, sessionCount: 0 };
     const sessionDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     return this.db.$transaction(async tx => {
-      let independent = true;
-      if (sessionHash) {
-        const inserted = await tx.scanSession.createMany({ data: { identityId, sessionHash, sessionDate }, skipDuplicates: true });
-        independent = inserted.count === 1;
-      }
-
+      const inserted = await tx.scanSession.createMany({ data: { identityId, sessionHash, sessionDate }, skipDuplicates: true });
+      const independent = inserted.count === 1;
       let firstScan = false;
       let scansRecorded = currentCount;
       if (independent) {
@@ -45,8 +44,7 @@ export class AppController {
         const updated = await tx.productIdentity.findUnique({ where: { id: identityId }, select: { verificationCount: true } });
         scansRecorded = updated?.verificationCount ?? currentCount + 1;
       }
-
-      const sessionCount = sessionHash ? await tx.scanSession.count({ where: { identityId, sessionDate } }) : 0;
+      const sessionCount = await tx.scanSession.count({ where: { identityId, sessionDate } });
       let outcome = initialOutcome;
       if ((initialOutcome === "VERIFIED" || initialOutcome === "PREVIOUSLY_SCANNED") && !independent) outcome = "VERIFIED";
       else if (initialOutcome === "VERIFIED" && !firstScan) outcome = "PREVIOUSLY_SCANNED";
@@ -295,7 +293,7 @@ export class AppController {
     if (outcome === "SUSPICIOUS_ACTIVITY") return { status: outcome, title: "Unusual verification activity", message: "This identity has been checked from many independent sessions in a short period. This pattern is not proof of counterfeiting; inspect the product and report concerns.", scansRecorded: scan.scansRecorded };
     if (scan.duplicate && (outcome === "VERIFIED" || outcome === "PREVIOUSLY_SCANNED")) return { status: "VERIFIED", title: "Already checked in this session", message: "This identity was already checked in this browser session. Refreshes do not count as additional independent scans.", duplicateScan: true, scansRecorded: scan.scansRecorded };
     const batch = identity.batch; const product = batch.product;
-    return { status: outcome, title: outcome === "VERIFIED" ? "PAN identity matched" : outcome === "PREVIOUSLY_SCANNED" ? "This identity has been scanned before" : outcome === "UNDER_REVIEW" ? "Product under review" : outcome === "MANUFACTURER_PENDING" ? "Manufacturer review pending" : outcome === "EXPIRED" ? "Recorded expiry date has passed" : "Identity revoked", message: outcome === "EXPIRED" ? "The producer batch record shows that this product has passed its recorded expiry date. Do not use or consume it; check the packaging and contact the producer." : outcome === "VERIFIED" ? "This code matches an active identity issued under the named producer’s PAN workspace. It indicates that the code was issued under this producer account; it does not independently prove the physical item was made by that producer or validate its contents, quality or regulatory status." : outcome === "PREVIOUSLY_SCANNED" ? "This code has been checked before. This is not proof of counterfeiting; compare the product details and contact the manufacturer if anything looks unusual." : outcome === "UNDER_REVIEW" ? "This identity is temporarily under review. Contact the manufacturer before relying on this product." : outcome === "MANUFACTURER_PENDING" ? "This code matches an identity record, but the manufacturer has not yet completed PAN approval. This is not a PAN endorsement of the product." : "This identity is no longer active in the PAN network.", product: { name: product.name, brand: product.brand, category: product.category, manufacturer: product.manufacturer.legalName, batchCode: batch.batchCode, productionDate: batch.productionDate, expiryDate: batch.expiryDate, packaging: { identityLevel: identity.level, cartonCode: identity.carton?.publicCode ?? null, containedUnitCount: identity.level === "CARTON" ? identity._count.containedUnits : null }, regulatoryReferences: { nafdacRegistrationNumber: product.nafdacRegistrationNumber, sonCertificateNumber: product.sonCertificateNumber, source: "PRODUCER_PROVIDED_NOT_VERIFIED_BY_PAN" } }, checkedAt: now.toISOString(), scansRecorded: identity.verificationCount + 1 };
+    return { status: outcome, title: outcome === "VERIFIED" ? "PAN identity matched" : outcome === "PREVIOUSLY_SCANNED" ? "This identity has been scanned before" : outcome === "UNDER_REVIEW" ? "Product under review" : outcome === "MANUFACTURER_PENDING" ? "Manufacturer review pending" : outcome === "EXPIRED" ? "Recorded expiry date has passed" : "Identity revoked", message: outcome === "EXPIRED" ? "The producer batch record shows that this product has passed its recorded expiry date. Do not use or consume it; check the packaging and contact the producer." : outcome === "VERIFIED" ? "This code matches an active identity issued under the named producer’s PAN workspace. It indicates that the code was issued under this producer account; it does not independently prove the physical item was made by that producer or validate its contents, quality or regulatory status." : outcome === "PREVIOUSLY_SCANNED" ? "This code has been checked before. This is not proof of counterfeiting; compare the product details and contact the manufacturer if anything looks unusual." : outcome === "UNDER_REVIEW" ? "This identity is temporarily under review. Contact the manufacturer before relying on this product." : outcome === "MANUFACTURER_PENDING" ? "This code matches an identity record, but the manufacturer has not yet completed PAN approval. This is not a PAN endorsement of the product." : "This identity is no longer active in the PAN network.", product: { name: product.name, brand: product.brand, category: product.category, manufacturer: product.manufacturer.legalName, batchCode: batch.batchCode, productionDate: batch.productionDate, expiryDate: batch.expiryDate, packaging: { identityLevel: identity.level, cartonCode: identity.carton?.publicCode ?? null, containedUnitCount: identity.level === "CARTON" ? identity._count.containedUnits : null }, regulatoryReferences: { nafdacRegistrationNumber: product.nafdacRegistrationNumber, sonCertificateNumber: product.sonCertificateNumber, source: "PRODUCER_PROVIDED_NOT_VERIFIED_BY_PAN" } }, checkedAt: now.toISOString(), scansRecorded: scan.scansRecorded };
   }
 
   @Get("v1/verify/:token")
@@ -305,7 +303,6 @@ export class AppController {
     if (!/^[A-Za-z0-9_-]{30,60}$/.test(token)) throw new NotFoundException("This product identity is not recognised.");
     const identity = await this.db.productIdentity.findUnique({ where: { tokenHash: tokenDigest(token) }, include: { batch: { include: { product: { include: { manufacturer: true } } } }, carton: { select: { publicCode: true } }, _count: { select: { containedUnits: true } } } });
     if (!identity) {
-      await this.db.verificationEvent.create({ data: { outcome: "NOT_RECOGNISED" } });
       return { status: "NOT_RECOGNISED", title: "Identity not recognised", message: "We could not find this code in the PAN network. Check that you scanned the code on the product itself." };
     }
     const now = new Date();
@@ -322,7 +319,7 @@ export class AppController {
       message: outcome === "VERIFIED" ? "This code matches an active identity in the PAN network. No known issue has been recorded for this identity." : outcome === "PREVIOUSLY_SCANNED" ? "This code has been checked before. This is not proof of counterfeiting; compare the product details and contact the manufacturer if anything looks unusual." : outcome === "UNDER_REVIEW" ? "This identity is temporarily under review. Contact the manufacturer before relying on this product." : outcome === "MANUFACTURER_PENDING" ? "This code matches an identity record, but the manufacturer has not yet completed PAN approval. This is not a PAN endorsement of the product." : "This identity is no longer active in the PAN network.",
       product: { name: product.name, brand: product.brand, category: product.category, manufacturer: product.manufacturer.legalName, batchCode: batch.batchCode, productionDate: batch.productionDate, expiryDate: batch.expiryDate, packaging: { identityLevel: identity.level, cartonCode: identity.carton?.publicCode ?? null, containedUnitCount: identity.level === "CARTON" ? identity._count.containedUnits : null }, regulatoryReferences: { nafdacRegistrationNumber: product.nafdacRegistrationNumber, sonCertificateNumber: product.sonCertificateNumber, source: "PRODUCER_PROVIDED_NOT_VERIFIED_BY_PAN" } },
       checkedAt: now.toISOString(),
-      scansRecorded: identity.verificationCount + 1
+      scansRecorded: scan.scansRecorded
     };
   }
 }
