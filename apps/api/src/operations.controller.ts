@@ -374,7 +374,7 @@ export class ManufacturerOperationsController {
     });
     const link = (process.env.MANUFACTURER_APP_URL || "http://localhost:3000") + "/accept-invite?token=" + encodeURIComponent(raw);
     await sendPanEmail(email, "You have been invited to a PAN workspace", "<p>You have been invited to join a manufacturer workspace on PAN.</p><p><a href=\"" + link + "\">Accept invitation</a></p><p>This invitation expires in seven days.</p>");
-    return { id: invitation.id, email, role, expiresAt: invitation.expiresAt, sent: true, ...(process.env.NODE_ENV !== "production" && (process.env.NODE_ENV === "test" || process.env.PAN_EXPOSE_TEST_TOKENS === "true") ? { testInvitationToken: raw } : {}) };
+    return { id: invitation.id, email, role, expiresAt: invitation.expiresAt, sent: true, ...(process.env.NODE_ENV !== "production" && (process.env.NODE_ENV === "test" || process.env.NODE_ENV !== "production" && (process.env.NODE_ENV === "test" || process.env.PAN_EXPOSE_TEST_TOKENS === "true")) ? { testInvitationToken: raw } : {}) };
   }
   @Post("team/invitations/:id/revoke")
   async revokeInvite(@Req() req: AuthRequest, @Param("id") id: string) {
