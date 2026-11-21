@@ -3,7 +3,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import "./activation-shortcut.css";
 
-export default function IssuanceLayout({ children }: { children: ReactNode }) {
+export default function IssuanceLayout({ children }: { children: React.ReactNode }) {
   return <>
     <nav className="issuance-activation-shortcut" aria-label="Identity lifecycle">
       <span>Printed labels passed quality inspection?</span>
