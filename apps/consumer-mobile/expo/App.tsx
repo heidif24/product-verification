@@ -31,7 +31,7 @@ export default function App() {
       const publicCode=value.match(/PAN(?:U|C)?-[A-Fa-f0-9]{20}/i)?.[0] || (/^PAN(?:U|C)?-/i.test(value)?value:"");
       setReportRef(tokenMatch?{token:tokenMatch[1]}:publicCode?{code:publicCode}:null);setShowReport(false);setReportNotice("");
       const url=tokenMatch?API+"/v1/verify/"+tokenMatch[1]:publicCode?API+"/v1/verify/code/"+encodeURIComponent(publicCode):"";
-      if(!url) throw new Error("This QR code is not a recognised PAN product identity.");
+      if(!url) throw new Error("This is not a recognised PAN barcode, legacy QR identity or manual product code.");
       const response=await fetch(url,{headers:{"X-PAN-Scan-Session":scanSession}});const data=await response.json();
       if(!response.ok) throw new Error(data.message||"We could not verify this identity.");
       setResult(data);
