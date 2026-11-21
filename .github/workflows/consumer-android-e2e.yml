@@ -6,7 +6,7 @@ on:
     branches: [main]
   workflow_dispatch:
 concurrency:
-  group: pan-consumer-android-${{ github.ref }}
+  group: pan-consumer-android-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
   android-emulator-e2e:
