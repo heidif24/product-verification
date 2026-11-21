@@ -113,7 +113,7 @@ export class AppController {
     await this.db.verificationToken.create({ data: { userId: created.user.id, tokenHash: tokenDigest(rawToken), purpose: "EMAIL_VERIFICATION", expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) } });
     const link = (process.env.MANUFACTURER_APP_URL || "http://localhost:3000") + "/verify-email?token=" + encodeURIComponent(rawToken);
     await sendPanEmail(email, "Verify your PAN manufacturer account", "<p>Welcome to PAN. Confirm your email address to activate your manufacturer login.</p><p><a href=\"" + link + "\">Verify email address</a></p><p>This link expires in 24 hours.</p>");
-    return { verificationRequired: true, message: "Check your email for a verification link before signing in.", ...(process.env.NODE_ENV === "test" ? { testVerificationToken: rawToken } : {}) };
+    return { verificationRequired: true, message: "Check your email for a verification link before signing in.", ...(process.env.PAN_EXPOSE_TEST_TOKENS === "true" ? { testVerificationToken: rawToken } : {}) };
   }
 
   @Post("v1/auth/verify-email")
@@ -160,7 +160,7 @@ export class AppController {
         await this.db.verificationToken.create({ data: { userId: user.id, tokenHash: tokenDigest(raw), purpose: "PASSWORD_RESET", expiresAt: new Date(Date.now() + 60 * 60 * 1000) } });
         const link = (process.env.MANUFACTURER_APP_URL || "http://localhost:3000") + "/reset-password?token=" + encodeURIComponent(raw);
         await sendPanEmail(email, "Reset your PAN password", "<p>We received a request to reset your PAN password.</p><p><a href=\"" + link + "\">Choose a new password</a></p><p>This link expires in one hour. If you did not request this, you can ignore this email.</p>");
-        return { message: "If this address belongs to a PAN account, password reset instructions have been sent.", ...(process.env.NODE_ENV === "test" ? { testResetToken: raw } : {}) };
+        return { message: "If this address belongs to a PAN account, password reset instructions have been sent.", ...(process.env.PAN_EXPOSE_TEST_TOKENS === "true" ? { testResetToken: raw } : {}) };
       }
     }
     return { message: "If this address belongs to a PAN account, password reset instructions have been sent." };
